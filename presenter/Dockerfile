@@ -4,8 +4,7 @@ WORKDIR /app
 
 COPY app.py /app/
 COPY templates /app/templates
-COPY ../model/model.h5 /app/model.h5
 
-RUN pip install flask tensorflow pillow numpy
+RUN pip install flask pika pillow numpy
 
 CMD ["python", "app.py"]

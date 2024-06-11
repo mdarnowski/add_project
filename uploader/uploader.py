@@ -2,12 +2,11 @@ import pika
 import json
 from pymongo import MongoClient
 
-client = MongoClient('localhost', 27017)
+client = MongoClient('mongodb://mongodb:27017/')
 db = client.bird_dataset
 collection = db.images
 
-# RabbitMQ connection
-connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
 channel = connection.channel()
 
 channel.queue_declare(queue='processed_data_queue')

@@ -20,13 +20,19 @@ services:
 
   producer:
     build: ./producer
+    environment:
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+    volumes:
+      - ./cub_200_2011:/app/cub_200_2011
     networks:
       - app-network
 
   processor:
     build: ./processor
+    environment:
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
     networks:
@@ -34,24 +40,43 @@ services:
 
   uploader:
     build: ./uploader
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
     depends_on:
       - rabbitmq
       - mongodb
+    networks:
+      - app-network
+
+  trainer:
+    build: ./trainer
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
+    depends_on:
+      - rabbitmq
+      - mongodb
+    networks:
+      - app-network
+
+  predictor:
+    build: ./predictor
+    environment:
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - rabbitmq
     networks:
       - app-network
 
   presenter:
     build: ./presenter
+    environment:
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - mongodb
     ports:
       - "5000:5000"
-    networks:
-      - app-network
-
-  model-train:
-    build: ./model
     networks:
       - app-network
 
