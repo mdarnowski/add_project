@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - app-network
+
+  mongodb:
+    image: mongo
+    ports:
+      - "27017:27017"
+    networks:
+      - app-network
+    volumes:
+      - mongo_data:/data/db
+
+  producer:
+    build: ./producer
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  processor:
+    build: ./processor
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  uploader:
+    build: ./uploader
+    depends_on:
+      - rabbitmq
+      - mongodb
+    networks:
+      - app-network
+
+  presenter:
+    build: ./presenter
+    depends_on:
+      - rabbitmq
+      - mongodb
+    ports:
+      - "5000:5000"
+    networks:
+      - app-network
+
+  model-train:
+    build: ./model
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
