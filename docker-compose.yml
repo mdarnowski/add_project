@@ -15,8 +15,6 @@ services:
       - "27017:27017"
     networks:
       - app-network
-    volumes:
-      - mongo_data:/data/db
 
   producer:
     build: ./producer
@@ -24,6 +22,7 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+      - processor
     volumes:
       - ./cub_200_2011:/app/cub_200_2011
     networks:
@@ -35,6 +34,7 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+      - uploader
     networks:
       - app-network
 
@@ -45,6 +45,7 @@ services:
       MONGO_HOST: mongodb
     depends_on:
       - rabbitmq
+      - trainer
       - mongodb
     networks:
       - app-network
@@ -56,6 +57,7 @@ services:
       MONGO_HOST: mongodb
     depends_on:
       - rabbitmq
+      - presenter
       - mongodb
     networks:
       - app-network

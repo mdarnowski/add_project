@@ -1,44 +1,66 @@
+import base64
 import json
 import os
-import random
+import time
 
 import pika
 
-connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
-channel = connection.channel()
-
-channel.queue_declare(queue="train_data_queue")
-channel.queue_declare(queue="val_data_queue")
-channel.queue_declare(queue="test_data_queue")
-
-dataset_path = "/app/cub_200_2011/images"
-data = []
-
-for subdir, _, files in os.walk(dataset_path):
-    for file in files:
-        if file.endswith(".jpg"):
-            image_path = os.path.join(subdir, file)
-            data.append(image_path)
-
-random.shuffle(data)
-total_data = len(data)
-train_split = int(total_data * 0.7)
-val_split = int(total_data * 0.1)
-test_split = total_data - train_split - val_split
-
-train_data = data[:train_split]
-val_data = data[train_split : train_split + val_split]
-test_data = data[train_split + val_split :]
+# Configuration
+DATASET_PATH = '/app/cub_200_2011/images'
+RABBITMQ_QUEUE = 'raw_image_queue'
 
 
-def send_data(queue_name, dataset):
-    for image_path in dataset:
-        message = json.dumps({"image_path": image_path})
-        channel.basic_publish(exchange="", routing_key=queue_name, body=message)
+def connect_to_rabbitmq() -> pika.BlockingConnection:
+    """
+    Connect to RabbitMQ server with retry on failure.
+
+    Returns:
+        pika.BlockingConnection: RabbitMQ connection object.
+    """
+    while True:
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
+            print("Connected to RabbitMQ.")
+            return connection
+        except pika.exceptions.AMQPConnectionError:
+            print("RabbitMQ not available, retrying in 5 seconds...")
+            time.sleep(5)
 
 
-send_data("train_data_queue", train_data)
-send_data("val_data_queue", val_data)
-send_data("test_data_queue", test_data)
+def publish_images_to_queue(dataset_path: str, queue_name: str) -> None:
+    """
+    Publish image data from a dataset directory to the RabbitMQ queue.
 
-connection.close()
+    Args:
+        dataset_path (str): Path to the dataset directory.
+        queue_name (str): Name of the RabbitMQ queue.
+    """
+    connection = connect_to_rabbitmq()
+    channel = connection.channel()
+    channel.queue_declare(queue=queue_name)
+
+    for subdir, _, files in os.walk(dataset_path):
+        for file in files:
+            if file.endswith('.jpg'):
+                image_path = os.path.join(subdir, file)
+                try:
+                    with open(image_path, 'rb') as image_file:
+                        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+                    message = json.dumps({
+                        'image_path': image_path,
+                        'image_data': encoded_image
+                    })
+
+                    channel.basic_publish(exchange='', routing_key=queue_name, body=message)
+                    print(f"Published {image_path} to {queue_name}")
+
+                except Exception as e:
+                    print(f"Failed to process {image_path}. Error: {e}")
+
+    connection.close()
+    print("Finished publishing images.")
+
+
+if __name__ == "__main__":
+    publish_images_to_queue(DATASET_PATH, RABBITMQ_QUEUE)
