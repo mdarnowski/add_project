@@ -9,16 +9,18 @@ from bson import ObjectId
 from loguru import logger
 from pymongo import MongoClient
 
+# MongoDB configuration
 MONGO_URI = "mongodb://mongodb:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 fs = gridfs.GridFS(db)
 images_collection = db.images
 
-# indexes for efficient querying
+# Create indexes for efficient querying
 images_collection.create_index([("species", pymongo.ASCENDING)])
 images_collection.create_index([("set_type", pymongo.ASCENDING)])
 images_collection.create_index([("image_type", pymongo.ASCENDING)])
+images_collection.create_index([("label", pymongo.ASCENDING)])
 
 
 # Connect to RabbitMQ
@@ -43,7 +45,7 @@ channel.queue_declare(queue="processed_image_queue")
 # Save image to GridFS and store metadata in a single collection
 def save_image_and_metadata(data: bytes, filename: str, metadata: dict) -> ObjectId:
     try:
-        image_id = fs.put(data, filename=filename, metadata=metadata)
+        image_id = fs.put(data, filename=filename)
         images_collection.insert_one(
             {
                 "filename": filename,
@@ -51,6 +53,7 @@ def save_image_and_metadata(data: bytes, filename: str, metadata: dict) -> Objec
                 "image_type": metadata["image_type"],
                 "species": metadata["species"],
                 "set_type": metadata["set_type"],
+                "label": metadata["label"],
             }
         )
         logger.info(f"Saved image {filename} with ID: {image_id}")
@@ -66,12 +69,11 @@ def raw_callback(ch, method, properties, body) -> None:
     raw_image_data = base64.b64decode(message["image_data"])
     metadata = {
         "image_type": "raw",
-        "species": message["label"],
+        "species": message["species"],
         "set_type": message["split"],
+        "label": message["label"],
     }
-    raw_image_id = save_image_and_metadata(
-        raw_image_data, message["image_path"], metadata
-    )
+    save_image_and_metadata(raw_image_data, message["image_path"], metadata)
 
 
 # Save processed image callback
@@ -80,12 +82,11 @@ def processed_callback(ch, method, properties, body) -> None:
     processed_image_data = base64.b64decode(message["processed_image_data"])
     metadata = {
         "image_type": "processed",
-        "species": message["label"],
+        "species": message["species"],
         "set_type": message["split"],
+        "label": message["label"],
     }
-    processed_image_id = save_image_and_metadata(
-        processed_image_data, message["image_path"], metadata
-    )
+    save_image_and_metadata(processed_image_data, message["image_path"], metadata)
 
 
 channel.basic_consume(
