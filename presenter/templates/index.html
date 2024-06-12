@@ -35,8 +35,7 @@
         <select id="species" name="species">
             <option value="">Select Species</option>
             {% for species in species_list %}
-                {% set split_species = species.split('.') %}
-                <option value="{{ species }}">{{ split_species[1] }}</option>
+                <option value="{{ species }}">{{ species }}</option>
             {% endfor %}
         </select>
         <label for="set_type">Set Type:</label>
