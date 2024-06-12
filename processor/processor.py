@@ -40,6 +40,7 @@ def send_to_queue(data: dict) -> None:
             ),
             "label": data["label"],
             "split": data["split"],
+            "species": data["species"],
         }
 
         channel.basic_publish(

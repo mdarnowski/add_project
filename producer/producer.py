@@ -42,14 +42,15 @@ def publish_images_to_queue(
                         encoded_image = base64.b64encode(image_file.read()).decode(
                             "utf-8"
                         )
-                    label = os.path.basename(
-                        subdir
-                    )  # Extract label from the subdirectory name
+
+                    parts = os.path.basename(subdir).split(".")
+
                     images.append(
                         {
-                            "image_path": image_path,
+                            "image_path": os.path.basename(image_path),
                             "image_data": encoded_image,
-                            "label": label,
+                            "label": int(parts[0]) - 1,
+                            "species": parts[1],
                         }
                     )
                 except Exception as e:
