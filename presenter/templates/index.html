@@ -53,9 +53,19 @@
             <option value="processed">Processed</option>
         </select>
         <label for="species">Species:</label>
-        <input type="text" id="species" name="species">
+        <select id="species" name="species">
+            <option value="">Select Species</option>
+            {% for species in species_list %}
+                <option value="{{ species }}">{{ species }}</option>
+            {% endfor %}
+        </select>
         <label for="set_type">Set Type:</label>
-        <input type="text" id="set_type" name="set_type">
+        <select id="set_type" name="set_type">
+            <option value="">Select Type</option>
+            <option value="train">Train</option>
+            <option value="val">Val</option>
+            <option value="test">Test</option>
+        </select>
         <button type="submit">Search</button>
     </form>
     <div id="results"></div>
