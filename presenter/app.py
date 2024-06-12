@@ -7,7 +7,6 @@ import time
 import gridfs
 import pika
 import uvicorn
-from bson import ObjectId
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -91,7 +90,9 @@ threading.Thread(target=consume_progress_updates, daemon=True).start()
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     species_list = images_collection.distinct("species")
-    return templates.TemplateResponse("index.html", {"request": request, "species_list": species_list})
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "species_list": species_list}
+    )
 
 
 @app.get("/search", response_class=HTMLResponse)
