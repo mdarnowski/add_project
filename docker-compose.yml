@@ -15,7 +15,8 @@ services:
       - "27017:27017"
     networks:
       - app-network
-
+    tmpfs:
+      - /data/db # Use anonymous volume for non-persistence
   producer:
     build:
       context: ./producer
