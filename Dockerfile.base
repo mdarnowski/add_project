@@ -1,0 +1,14 @@
+# Base image for all services
+FROM python:3.9-slim
+
+# Set environment variable for unbuffered Python output
+ENV PYTHONUNBUFFERED=1
+
+# Set the working directory
+WORKDIR /app
+
+# Install common dependencies
+COPY base-requirements.txt .
+RUN pip install --no-cache-dir -r base-requirements.txt
+
+# This base image will be used by other Dockerfiles

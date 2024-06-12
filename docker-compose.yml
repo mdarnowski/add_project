@@ -17,40 +17,51 @@ services:
       - app-network
 
   producer:
-    build: ./producer
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - processor
     volumes:
+      - ./producer:/app  # Mount local code
       - ./data/cub_200_2011:/app/cub_200_2011
     networks:
       - app-network
 
   processor:
-    build: ./processor
+    build:
+      context: ./processor
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - uploader
+    volumes:
+      - ./processor:/app  # Mount local code
     networks:
       - app-network
 
   uploader:
-    build: ./uploader
+    build:
+      context: ./uploader
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
       MONGO_HOST: mongodb
     depends_on:
       - rabbitmq
       - mongodb
+    volumes:
+      - ./uploader:/app  # Mount local code
     networks:
       - app-network
 
   presenter:
-    build: ./presenter
+    build:
+      context: ./presenter
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
       MONGO_HOST: mongodb
@@ -59,12 +70,37 @@ services:
       - mongodb
     ports:
       - "8000:8000"
+    volumes:
+      - ./presenter:/app  # Mount local code
+    networks:
+      - app-network
+
+  trainer:
+    build:
+      context: ./trainer
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - rabbitmq
+    volumes:
+      - ./trainer:/app  # Mount local code
+    networks:
+      - app-network
+
+  predictor:
+    build:
+      context: ./predictor
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - rabbitmq
+    volumes:
+      - ./predictor:/app  # Mount local code
     networks:
       - app-network
 
 networks:
   app-network:
     driver: bridge
-
-volumes:
-  mongo_data:

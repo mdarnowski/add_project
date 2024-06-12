@@ -1,9 +1,12 @@
-FROM python:3.9-slim
+FROM my-python-base
+
 ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-COPY uploader.py /app/
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install pika pymongo loguru
+COPY uploader.py /app/
 
 CMD ["python", "uploader.py"]
