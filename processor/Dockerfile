@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY processor.py /app/
 
-RUN pip install pika pillow numpy loguru
+RUN pip install pika pillow numpy loguru torchvision
 
 CMD ["python", "processor.py"]
