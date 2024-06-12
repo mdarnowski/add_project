@@ -17,29 +17,33 @@ services:
       - app-network
 
   producer:
-    build: ./producer
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - processor
     volumes:
       - ./data/cub_200_2011:/app/cub_200_2011
     networks:
       - app-network
 
   processor:
-    build: ./processor
+    build:
+      context: ./processor
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - uploader
     networks:
       - app-network
 
   uploader:
-    build: ./uploader
+    build:
+      context: ./uploader
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
       MONGO_HOST: mongodb
@@ -50,7 +54,9 @@ services:
       - app-network
 
   presenter:
-    build: ./presenter
+    build:
+      context: ./presenter
+      dockerfile: Dockerfile
     environment:
       RABBITMQ_HOST: rabbitmq
       MONGO_HOST: mongodb
@@ -62,7 +68,28 @@ services:
     networks:
       - app-network
 
+  trainer:
+    build:
+      context: ./trainer
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  predictor:
+    build:
+      context: ./predictor
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
 networks:
   app-network:
     driver: bridge
-

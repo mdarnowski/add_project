@@ -4,9 +4,9 @@ import json
 import time
 
 import pika
+import torchvision.transforms as transforms
 from loguru import logger
 from PIL import Image
-import torchvision.transforms as transforms
 
 
 def connect_to_rabbitmq() -> pika.BlockingConnection:
@@ -33,17 +33,25 @@ def send_to_queue(data: dict) -> None:
         image = Image.open(io.BytesIO(image_data))
 
         # Define transformations
-        transform = transforms.Compose([
-            transforms.Resize((256, 256)),  # Resize to larger, then crop to desired size
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
-            transforms.RandomRotation(10),  # Slightly reduced rotation
-            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),  # Slight translations
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # ImageNet mean and std
-        ])
+        transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    (256, 256)
+                ),  # Resize to larger, then crop to desired size
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
+                transforms.RandomRotation(10),  # Slightly reduced rotation
+                transforms.RandomAffine(
+                    degrees=0, translate=(0.1, 0.1)
+                ),  # Slight translations
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),  # ImageNet mean and std
+            ]
+        )
 
         # Apply transformations
         transformed_image = transform(image)

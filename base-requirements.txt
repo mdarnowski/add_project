@@ -1,0 +1,7 @@
+pika
+pillow
+numpy
+pymongo
+tensorflow
+loguru
+torch
