@@ -25,6 +25,7 @@ services:
     depends_on:
       - rabbitmq
     volumes:
+      - ./producer:/app  # Mount local code
       - ./data/cub_200_2011:/app/cub_200_2011
     networks:
       - app-network
@@ -37,6 +38,8 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+    volumes:
+      - ./processor:/app  # Mount local code
     networks:
       - app-network
 
@@ -50,6 +53,8 @@ services:
     depends_on:
       - rabbitmq
       - mongodb
+    volumes:
+      - ./uploader:/app  # Mount local code
     networks:
       - app-network
 
@@ -65,6 +70,8 @@ services:
       - mongodb
     ports:
       - "8000:8000"
+    volumes:
+      - ./presenter:/app  # Mount local code
     networks:
       - app-network
 
@@ -76,6 +83,8 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+    volumes:
+      - ./trainer:/app  # Mount local code
     networks:
       - app-network
 
@@ -87,6 +96,8 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
+    volumes:
+      - ./predictor:/app  # Mount local code
     networks:
       - app-network
 

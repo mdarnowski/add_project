@@ -83,6 +83,7 @@ def publish_images_to_queue(
                 publish_to_queues(data, "test")
 
     connection.close()
+    logger.info("DUPA")
     logger.info("Finished publishing images.")
 
 
