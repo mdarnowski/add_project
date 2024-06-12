@@ -20,10 +20,31 @@
             max-width: 100%;
             height: auto;
         }
+        #progress-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        #progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
     <h1>Bird Dataset</h1>
+
+    <div id="progress-container">
+        <div id="progress-bar">0%</div>
+    </div>
+
     <form id="search-form">
         <label for="image_type">Image Type:</label>
         <select id="image_type" name="image_type">
@@ -51,6 +72,29 @@
                     $('#results').html(data);
                 });
             });
+
+            function fetchProgress() {
+                $.get('/progress', function(data) {
+                    const progressBar = $('#progress-bar');
+                    if (data.total > 0) {
+                        const percentage = (data.processed / data.total) * 100;
+                        progressBar.css('width', percentage + '%');
+                        progressBar.text(Math.floor(percentage) + '%');
+                    } else {
+                        progressBar.css('width', '0%');
+                        progressBar.text('0%');
+                    }
+
+                    // Fetch progress every 1 seconds
+                    setTimeout(fetchProgress, 1000);
+                }).fail(function() {
+                    // Retry after 1 seconds if there's an error
+                    setTimeout(fetchProgress, 1000);
+                });
+            }
+
+            // Start fetching progress when the page loads
+            fetchProgress();
         });
     </script>
 </body>
