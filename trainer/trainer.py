@@ -1,55 +1,49 @@
 import base64
 import io
-import json
-import time
-from typing import Dict, List, Tuple
+from typing import Tuple
 
 import gridfs
-import matplotlib.pyplot as plt
 import numpy as np
-import pika
+import tensorflow as tf
 from PIL import Image
 from pymongo import MongoClient
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
-from tensorflow.python.keras.callbacks import EarlyStopping
+from tensorflow.keras.utils import to_categorical
 
 # MongoDB setup
 MONGO_URI = "mongodb://127.0.0.1:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
-weights_collection = db.model_weights
 collection = db.images
 fs = gridfs.GridFS(db)
 
 
 def create_model(num_classes: int) -> Model:
-    """Create a MobileNetV2-based model with custom dense layers."""
-    base_model = MobileNetV2(
-        weights="imagenet", include_top=False, input_shape=(224, 224, 3)
+    """Create an InceptionV3-based model with custom dense layers."""
+    base_model = tf.keras.applications.InceptionV3(
+        include_top=False, input_shape=(224, 224, 3)
     )
-    x = GlobalAveragePooling2D()(base_model.output)
-    x = Dense(512, activation="relu")(x)
-    x = Dropout(0.5)(x)
-    x = Dense(256, activation="relu")(x)
-    x = Dropout(0.5)(x)
-    predictions = Dense(num_classes, activation="softmax")(x)
-    model = Model(inputs=base_model.input, outputs=predictions)
+    base_model.trainable = False
+
+    inputs = tf.keras.layers.Input(shape=(224, 224, 3), name="input-layer")
+    x = base_model(inputs)
+    x = GlobalAveragePooling2D(name="global_average_pooling_layer")(x)
+    outputs = Dense(num_classes, activation="softmax", name="output-layer")(x)
+    model = Model(inputs, outputs)
+
     model.compile(
-        optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.01),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"],
     )
     return model
 
 
-def load_data(
-    split: str, visualize: bool = False
-) -> Tuple[np.ndarray, np.ndarray, int]:
+def load_data(split: str) -> Tuple[np.ndarray, np.ndarray, int]:
     """Load image data and labels from MongoDB."""
     data_cursor = collection.find({"set_type": split, "image_type": "processed"})
     X, y = [], []
-    images_to_visualize, labels_to_visualize = [], []
-
     label_to_index = {}
     current_index = 0
 
@@ -66,52 +60,45 @@ def load_data(
         X.append(img_array)
         y.append(label_to_index[label])
 
-        if visualize and len(images_to_visualize) < 5:
-            images_to_visualize.append(image)
-            labels_to_visualize.append(label)
-
-    if visualize:
-        for img, lbl in zip(images_to_visualize, labels_to_visualize):
-            plt.figure()
-            plt.imshow(img)
-            plt.title(f"{split.capitalize()} Image - Label: {lbl}")
-            plt.axis("off")
-            plt.show()
-
-    return np.array(X), np.array(y), len(label_to_index)
+    X = np.array(X)
+    y = to_categorical(np.array(y), num_classes=current_index)
+    return X, y, current_index
 
 
 def train_and_evaluate_model() -> None:
-    """Train the model with data from MongoDB and evaluate on test data."""
+    """Train the model with data from MongoDB and evaluate it."""
     print("Starting model training...")
 
-    X_train, y_train, num_classes_train = load_data("train", visualize=True)
-    X_val, y_val, num_classes_val = load_data("val", visualize=True)
-    X_test, y_test, num_classes_test = load_data("test", visualize=True)
+    # Load data
+    X_train, y_train, num_classes = load_data("train")
+    X_val, y_val, _ = load_data("val")
+    X_test, y_test, _ = load_data("test")
 
-    if X_train.size == 0 or X_val.size == 0 or X_test.size == 0:
-        print("No training, validation, or test data found. Aborting training.")
-        return
-
-    num_classes = max(num_classes_train, num_classes_val, num_classes_test)
     model = create_model(num_classes)
 
-    model.fit(X_train, y_train, epochs=40, validation_data=(X_val, y_val))
-    print("Model training completed. Starting evaluation on test data...")
+    # Initial training phase
+    print("Training with frozen base model...")
+    model.fit(X_train, y_train, epochs=10, validation_data=(X_val, y_val))
+
+    # Fine-tuning phase
+    print("Fine-tuning the model...")
+    base_model = model.layers[1]  # Assuming base model is the second layer
+    base_model.trainable = True
+    for layer in base_model.layers[:-10]:
+        layer.trainable = False
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+
+    model.fit(X_train, y_train, epochs=5, validation_data=(X_val, y_val))
+
+    # Evaluate on test data
+    print("Evaluating on test data...")
     test_loss, test_accuracy = model.evaluate(X_test, y_test)
     print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
-
-
-def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """Connect to RabbitMQ server with retry on failure."""
-    while True:
-        try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
-            print("Connected to RabbitMQ.")
-            return connection
-        except pika.exceptions.AMQPConnectionError:
-            print("RabbitMQ not available, retrying in 5 seconds...")
-            time.sleep(5)
 
 
 if __name__ == "__main__":
