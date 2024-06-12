@@ -1,52 +1,77 @@
 import base64
-import io
-import json
-import time
+import logging
 
-import numpy as np
-import pika
-from flask import Flask, jsonify, redirect, render_template, request, url_for
-from PIL import Image
+import gridfs
+import uvicorn
+from bson import ObjectId
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from pymongo import MongoClient
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Connect to RabbitMQ
-def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ server with retry on failure.
+# MongoDB configuration
+MONGO_URI = "mongodb://mongodb:27017/"
+client = MongoClient(MONGO_URI)
+db = client.bird_dataset
+images_collection = db.images
+fs = gridfs.GridFS(db)
 
-    Returns:
-        pika.BlockingConnection: RabbitMQ connection object.
-    """
-    while True:
-        try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
-            print("Connected to RabbitMQ.")
-            return connection
-        except pika.exceptions.AMQPConnectionError:
-            print("RabbitMQ not available, retrying in 5 seconds...")
-            time.sleep(5)
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
 
-# Initialize Flask app
-app = Flask(__name__)
-
-# Establish RabbitMQ connection and channel
-connection = connect_to_rabbitmq()
-channel = connection.channel()
-
-# Declare queues
+def get_image(image_id):
+    if not image_id:
+        return None
+    image_data = fs.get(image_id).read()
+    return base64.b64encode(image_data).decode("utf-8")
 
 
-@app.route("/")
-def index():
-    """
-    Render the index page.
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-    Returns:
-        str: Rendered HTML template for the index page.
-    """
-    return render_template("index.html")
+
+@app.get("/search", response_class=HTMLResponse)
+async def search(
+    request: Request,
+    image_type: str = Query(None),
+    species: str = Query(None),
+    set_type: str = Query(None),
+):
+    query = {}
+    if image_type:
+        query["image_type"] = image_type
+    if species:
+        query["species"] = species
+    if set_type:
+        query["set_type"] = set_type
+
+    logger.info(f"Query: {query}")
+
+    images_cursor = images_collection.find(query).limit(100)
+    images = []
+    for data in images_cursor:
+        image_id = data.get("image_id")
+        image_data = {
+            "species": data.get("species"),
+            "set_type": data.get("set_type"),
+            "image_path": data.get("filename"),
+            "image_type": data.get("image_type"),
+            "image": get_image(image_id),
+        }
+        images.append(image_data)
+
+    logger.info(f"Images: {images}")
+    return templates.TemplateResponse(
+        "results.html", {"request": request, "images": images}
+    )
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0")
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

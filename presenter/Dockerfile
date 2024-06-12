@@ -5,6 +5,6 @@ WORKDIR /app
 COPY app.py /app/
 COPY templates /app/templates
 
-RUN pip install flask pika pillow numpy
+RUN pip install fastapi uvicorn pymongo jinja2
 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

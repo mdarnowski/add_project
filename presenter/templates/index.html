@@ -1,10 +1,57 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Bird Species Classifier</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bird Dataset</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">
+    <style>
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .card {
+            border: 1px solid #ccc;
+            margin: 10px;
+            padding: 10px;
+            width: 300px;
+        }
+        .card img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
 </head>
 <body>
-
+    <h1>Bird Dataset</h1>
+    <form id="search-form">
+        <label for="image_type">Image Type:</label>
+        <select id="image_type" name="image_type">
+            <option value="">Select Type</option>
+            <option value="raw">Raw</option>
+            <option value="processed">Processed</option>
+        </select>
+        <label for="species">Species:</label>
+        <input type="text" id="species" name="species">
+        <label for="set_type">Set Type:</label>
+        <input type="text" id="set_type" name="set_type">
+        <button type="submit">Search</button>
+    </form>
+    <div id="results"></div>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#search-form').on('submit', function(e) {
+                e.preventDefault();
+                const image_type = $('#image_type').val();
+                const species = $('#species').val();
+                const set_type = $('#set_type').val();
+                $.get('/search', { image_type: image_type, species: species, set_type: set_type }, function(data) {
+                    $('#results').html(data);
+                });
+            });
+        });
+    </script>
 </body>
 </html>

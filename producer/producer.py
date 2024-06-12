@@ -9,13 +9,11 @@ from loguru import logger
 
 # Configuration
 DATASET_PATH = "/app/cub_200_2011/images"
-RABBITMQ_QUEUE = "raw_image_queue"
+RAW_IMAGE_QUEUE = "raw_image_queue"
+RAW_IMAGE_QUEUE_FOR_UPLOADER = "raw_image_queue_uploader"
 
 
 def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ server with retry on failure.
-    """
     while True:
         try:
             connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
@@ -26,16 +24,15 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
             time.sleep(5)
 
 
-def publish_images_to_queue(dataset_path: str, queue_name: str) -> None:
-    """
-    Publish image data from a dataset directory to the RabbitMQ queue.
-    """
+def publish_images_to_queue(
+    dataset_path: str, queue_name: str, queue_name_uploader: str
+) -> None:
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue=queue_name)
+    channel.queue_declare(queue=queue_name_uploader)
 
     for subdir, _, files in os.walk(dataset_path):
-
         images = []
         for file in files:
             if file.endswith(".jpg"):
@@ -45,42 +42,49 @@ def publish_images_to_queue(dataset_path: str, queue_name: str) -> None:
                         encoded_image = base64.b64encode(image_file.read()).decode(
                             "utf-8"
                         )
+                    label = os.path.basename(
+                        subdir
+                    )  # Extract label from the subdirectory name
                     images.append(
-                        {"image_path": image_path, "image_data": encoded_image}
+                        {
+                            "image_path": image_path,
+                            "image_data": encoded_image,
+                            "label": label,
+                        }
                     )
                 except Exception as e:
                     logger.error(f"Failed to process {image_path}. Error: {e}")
 
-        # Shuffle and split the dataset
-        random.shuffle(images)
-        total_data = len(images)
-        train_split = int(total_data * 0.7)
-        val_split = int(total_data * 0.1)
+        if images:
+            # Shuffle and split the dataset for the current subdirectory
+            random.shuffle(images)
+            total_data = len(images)
+            train_split = int(total_data * 0.7)
+            val_split = int(total_data * 0.1)
 
-        train_data = images[:train_split]
-        val_data = images[train_split : train_split + val_split]
-        test_data = images[train_split + val_split :]
+            train_data = images[:train_split]
+            val_data = images[train_split : train_split + val_split]
+            test_data = images[train_split + val_split :]
 
-        # Send data to respective queues
-        for data in train_data:
-            data["split"] = "train"
-            channel.basic_publish(
-                exchange="", routing_key=queue_name, body=json.dumps(data)
-            )
-        for data in val_data:
-            data["split"] = "val"
-            channel.basic_publish(
-                exchange="", routing_key=queue_name, body=json.dumps(data)
-            )
-        for data in test_data:
-            data["split"] = "test"
-            channel.basic_publish(
-                exchange="", routing_key=queue_name, body=json.dumps(data)
-            )
+            def publish_to_queues(data, split):
+                data["split"] = split
+                channel.basic_publish(
+                    exchange="", routing_key=queue_name, body=json.dumps(data)
+                )
+                channel.basic_publish(
+                    exchange="", routing_key=queue_name_uploader, body=json.dumps(data)
+                )
+
+            for data in train_data:
+                publish_to_queues(data, "train")
+            for data in val_data:
+                publish_to_queues(data, "val")
+            for data in test_data:
+                publish_to_queues(data, "test")
 
     connection.close()
     logger.info("Finished publishing images.")
 
 
 if __name__ == "__main__":
-    publish_images_to_queue(DATASET_PATH, RABBITMQ_QUEUE)
+    publish_images_to_queue(DATASET_PATH, RAW_IMAGE_QUEUE, RAW_IMAGE_QUEUE_FOR_UPLOADER)

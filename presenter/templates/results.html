@@ -1,0 +1,21 @@
+<div class="container">
+    {% if images %}
+        {% for image in images %}
+        <div class="card">
+            <h2>{{ image.species }}</h2>
+            <p>Set Type: {{ image.set_type }}</p>
+            <p>Image Path: {{ image.image_path }}</p>
+            <p>Image Type: {{ image.image_type }}</p>
+            {% if image.image %}
+            <div>
+                <img src="data:image/jpeg;base64,{{ image.image }}" alt="{{ image.image_type }} Image">
+            </div>
+            {% else %}
+            <p>No image available</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>No results found.</p>
+    {% endif %}
+</div>

@@ -9,25 +9,19 @@ from PIL import Image
 
 
 def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ server with retry on failure.
-    """
     while True:
         try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
+            conn = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
             logger.info("Connected to RabbitMQ.")
-            return connection
+            return conn
         except pika.exceptions.AMQPConnectionError:
             logger.warning("RabbitMQ not available, retrying in 5 seconds...")
             time.sleep(5)
 
 
 def send_to_queue(data: dict) -> None:
-    """
-    Send processed image data to the RabbitMQ queue.
-    """
-    connection = connect_to_rabbitmq()
-    channel = connection.channel()
+    conn = connect_to_rabbitmq()
+    channel = conn.channel()
     channel.queue_declare(queue="processed_image_queue")
 
     try:
@@ -39,12 +33,12 @@ def send_to_queue(data: dict) -> None:
         image_bytes = io.BytesIO()
         image.save(image_bytes, format="JPEG")
 
-        label = image_path.split("/")[-2]
-
         processed_message = {
             "image_path": image_path,
-            "data": base64.b64encode(image_bytes.getvalue()).decode("utf-8"),
-            "label": label,
+            "processed_image_data": base64.b64encode(image_bytes.getvalue()).decode(
+                "utf-8"
+            ),
+            "label": data["label"],
             "split": data["split"],
         }
 
@@ -58,10 +52,9 @@ def send_to_queue(data: dict) -> None:
     except Exception as e:
         logger.error(f"Error processing image_path: {image_path}. Error: {e}")
 
-    connection.close()
+    conn.close()
 
 
-# RabbitMQ connection for consuming
 connection = connect_to_rabbitmq()
 channel = connection.channel()
 
@@ -69,9 +62,6 @@ channel.queue_declare(queue="raw_image_queue")
 
 
 def callback(ch, method, properties, body) -> None:
-    """
-    Callback function to handle incoming messages from the RabbitMQ queue.
-    """
     message = json.loads(body)
     send_to_queue(message)
     logger.info(f"Processed and sent message for image_path: {message['image_path']}")

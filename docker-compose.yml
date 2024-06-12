@@ -53,10 +53,12 @@ services:
     build: ./presenter
     environment:
       RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
     depends_on:
       - rabbitmq
+      - mongodb
     ports:
-      - "5000:5000"
+      - "8000:8000"
     networks:
       - app-network
 
