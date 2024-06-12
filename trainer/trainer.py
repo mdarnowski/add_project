@@ -4,142 +4,106 @@ import json
 import time
 from typing import Dict, List, Tuple
 
+import gridfs
+import matplotlib.pyplot as plt
 import numpy as np
 import pika
 from PIL import Image
 from pymongo import MongoClient
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, Dropout, Flatten
+from tensorflow.keras.layers import Dense, Dropout, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
+from tensorflow.python.keras.callbacks import EarlyStopping
 
 # MongoDB setup
-MONGO_URI = "mongodb://mongodb:27017/"
+MONGO_URI = "mongodb://127.0.0.1:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
-weights_collection = db.model_weights  # Collection for model weights
-collection = db.images  # Collection for image data
+weights_collection = db.model_weights
+collection = db.images
+fs = gridfs.GridFS(db)
 
 
-# Create a mapping from class names to integer labels
-def create_class_mapping() -> Dict[str, int]:
-    """
-    Create a mapping from class names to integer labels.
-
-    Returns:
-        Dict[str, int]: Mapping of class names to integer labels.
-    """
-    labels = collection.distinct("label")
-    class_mapping = {label: idx for idx, label in enumerate(sorted(labels))}
-    return class_mapping
-
-
-class_mapping = create_class_mapping()
-print(f"Class Mapping: {class_mapping}")
-
-
-# Model creation
 def create_model(num_classes: int) -> Model:
-    """
-    Create a MobileNetV2-based model with custom dense layers.
-
-    Args:
-        num_classes (int): Number of output classes.
-
-    Returns:
-        tf.keras.models.Model: Compiled Keras model.
-    """
+    """Create a MobileNetV2-based model with custom dense layers."""
     base_model = MobileNetV2(
         weights="imagenet", include_top=False, input_shape=(224, 224, 3)
     )
-    x = Flatten()(base_model.output)
+    x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation="relu")(x)
     x = Dropout(0.5)(x)
+    x = Dense(256, activation="relu")(x)
+    x = Dropout(0.5)(x)
     predictions = Dense(num_classes, activation="softmax")(x)
-
     model = Model(inputs=base_model.input, outputs=predictions)
+    model.compile(
+        optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+    )
     return model
 
 
-# Instantiate and compile model
-model = create_model(len(class_mapping))
-model.compile(
-    optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
-)
+def load_data(
+    split: str, visualize: bool = False
+) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Load image data and labels from MongoDB."""
+    data_cursor = collection.find({"set_type": split, "image_type": "processed"})
+    X, y = [], []
+    images_to_visualize, labels_to_visualize = [], []
 
+    label_to_index = {}
+    current_index = 0
 
-# Load dataset from MongoDB
-def load_data(split: str) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Load image data and labels from MongoDB.
-
-    Args:
-        split (str): Data split type ('train' or 'val').
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Tuple of image arrays and labels.
-    """
-    data_cursor = collection.find({"split": split})
-    X: List[np.ndarray] = []
-    y: List[int] = []
     for item in data_cursor:
-        image_data = base64.b64decode(item["data"])
+        image_data = fs.get(item["image_id"]).read()
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
         img_array = np.array(image) / 255.0
 
         label = item["label"]
-        if label in class_mapping:
-            X.append(img_array)
-            y.append(class_mapping[label])
-        else:
-            print(f"Label '{label}' not found in class mapping. Skipping image.")
+        if label not in label_to_index:
+            label_to_index[label] = current_index
+            current_index += 1
 
-    return np.array(X), np.array(y)
+        X.append(img_array)
+        y.append(label_to_index[label])
 
+        if visualize and len(images_to_visualize) < 5:
+            images_to_visualize.append(image)
+            labels_to_visualize.append(label)
 
-# Training the model
-def train_model(ch, method, properties, body) -> None:
-    """
-    Train the model with data from MongoDB.
+    if visualize:
+        for img, lbl in zip(images_to_visualize, labels_to_visualize):
+            plt.figure()
+            plt.imshow(img)
+            plt.title(f"{split.capitalize()} Image - Label: {lbl}")
+            plt.axis("off")
+            plt.show()
 
-    Args:
-        ch: Channel.
-        method: Method.
-        properties: Properties.
-        body: Message body containing training request.
-    """
-    message = json.loads(body)
-    if message.get("train"):
-        print("Starting model training...")
-
-        X_train, y_train = load_data("train")
-        X_val, y_val = load_data("val")
-
-        if X_train.size == 0 or X_val.size == 0:
-            print("No training or validation data found. Aborting training.")
-            return
-
-        model.fit(X_train, y_train, epochs=10, validation_data=(X_val, y_val))
-
-        # Save weights to MongoDB
-        weights_id = weights_collection.insert_one(
-            {"weights": [w.tolist() for w in model.get_weights()]}
-        ).inserted_id
-        channel.basic_publish(
-            exchange="",
-            routing_key="trained_model",
-            body=json.dumps({"weights_id": str(weights_id)}),
-        )
-        print("Model training completed and weights sent.")
+    return np.array(X), np.array(y), len(label_to_index)
 
 
-# Connect to RabbitMQ
+def train_and_evaluate_model() -> None:
+    """Train the model with data from MongoDB and evaluate on test data."""
+    print("Starting model training...")
+
+    X_train, y_train, num_classes_train = load_data("train", visualize=True)
+    X_val, y_val, num_classes_val = load_data("val", visualize=True)
+    X_test, y_test, num_classes_test = load_data("test", visualize=True)
+
+    if X_train.size == 0 or X_val.size == 0 or X_test.size == 0:
+        print("No training, validation, or test data found. Aborting training.")
+        return
+
+    num_classes = max(num_classes_train, num_classes_val, num_classes_test)
+    model = create_model(num_classes)
+
+    model.fit(X_train, y_train, epochs=40, validation_data=(X_val, y_val))
+    print("Model training completed. Starting evaluation on test data...")
+    test_loss, test_accuracy = model.evaluate(X_test, y_test)
+    print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+
+
 def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ server with retry on failure.
-
-    Returns:
-        pika.BlockingConnection: RabbitMQ connection object.
-    """
+    """Connect to RabbitMQ server with retry on failure."""
     while True:
         try:
             connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
@@ -150,16 +114,5 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
             time.sleep(5)
 
 
-# RabbitMQ setup for consuming
-connection = connect_to_rabbitmq()
-channel = connection.channel()
-
-channel.queue_declare(queue="train_request")
-channel.queue_declare(queue="trained_model")
-
-channel.basic_consume(
-    queue="train_request", on_message_callback=train_model, auto_ack=True
-)
-
-print("Trainer is waiting for training request...")
-channel.start_consuming()
+if __name__ == "__main__":
+    train_and_evaluate_model()
