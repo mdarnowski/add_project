@@ -10,7 +10,7 @@ from tensorflow.keras.layers import Dense, Dropout, Flatten
 from tensorflow.keras.models import Model
 
 # MongoDB setup
-MONGO_URI = 'mongodb://mongodb:27017/'
+MONGO_URI = "mongodb://mongodb:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 weights_collection = db.model_weights  # Collection for model weights
@@ -24,11 +24,13 @@ def create_model() -> Model:
     Returns:
         tf.keras.models.Model: Compiled Keras model.
     """
-    base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    base_model = MobileNetV2(
+        weights="imagenet", include_top=False, input_shape=(224, 224, 3)
+    )
     x = Flatten()(base_model.output)
-    x = Dense(512, activation='relu')(x)
+    x = Dense(512, activation="relu")(x)
     x = Dropout(0.5)(x)
-    predictions = Dense(200, activation='softmax')(x)  # Assuming 200 classes
+    predictions = Dense(200, activation="softmax")(x)  # Assuming 200 classes
 
     model = Model(inputs=base_model.input, outputs=predictions)
     return model
@@ -46,9 +48,9 @@ def load_weights(weights_id: str) -> None:
     Args:
         weights_id (str): The identifier for the weights document in MongoDB.
     """
-    weights_doc = weights_collection.find_one({'_id': weights_id})
+    weights_doc = weights_collection.find_one({"_id": weights_id})
     if weights_doc:
-        weights = [np.array(w) for w in weights_doc['weights']]
+        weights = [np.array(w) for w in weights_doc["weights"]]
         model.set_weights(weights)
         print("Model weights loaded successfully.")
     else:
@@ -65,7 +67,7 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
     """
     while True:
         try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
+            connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
             print("Connected to RabbitMQ.")
             return connection
         except pika.exceptions.AMQPConnectionError:
@@ -76,7 +78,7 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
 # Establish RabbitMQ connection and channel
 connection = connect_to_rabbitmq()
 channel = connection.channel()
-channel.queue_declare(queue='trained_model')
+channel.queue_declare(queue="trained_model")
 
 
 # Message handler
@@ -91,12 +93,14 @@ def on_weights_received(ch, method, properties, body) -> None:
         body: Message body containing weights_id.
     """
     message = json.loads(body)
-    weights_id = message['weights_id']
+    weights_id = message["weights_id"]
     load_weights(weights_id)
 
 
 # Start consuming messages
-channel.basic_consume(queue='trained_model', on_message_callback=on_weights_received, auto_ack=True)
+channel.basic_consume(
+    queue="trained_model", on_message_callback=on_weights_received, auto_ack=True
+)
 
-print('Predictor is waiting for model weights...')
+print("Predictor is waiting for model weights...")
 channel.start_consuming()

@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY uploader.py /app/
 
-RUN pip install pika pymongo
+RUN pip install pika pymongo loguru
 
 CMD ["python", "uploader.py"]

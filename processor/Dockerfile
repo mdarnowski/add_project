@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY processor.py /app/
 
-RUN pip install pika pillow numpy
+RUN pip install pika pillow numpy loguru
 
 CMD ["python", "processor.py"]

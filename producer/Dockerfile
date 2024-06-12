@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY producer.py /app/
 
-RUN pip install pika
+RUN pip install pika loguru
 
 CMD ["python", "producer.py"]
