@@ -1,8 +1,4 @@
-import gc
 import io
-from typing import Tuple, Iterator
-import gridfs
-import keras.backend
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -16,12 +12,11 @@ from tensorflow.keras.layers import (
     GlobalAveragePooling2D,
 )
 from tensorflow.keras.models import Model
-from tensorflow.keras import mixed_precision
-from tensorflow.keras.utils import to_categorical
-import itertools
+import gridfs
+
 
 # Enable mixed precision
-mixed_precision.set_global_policy("mixed_float16")
+tf.keras.mixed_precision.set_global_policy("mixed_float16")
 
 # MongoDB setup
 MONGO_URI = "mongodb://127.0.0.1:27017/"
@@ -29,13 +24,6 @@ client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 collection = db.images
 fs = gridfs.GridFS(db)
-
-
-def get_num_classes() -> int:
-    """Fetch the number of unique classes from the database."""
-    num_classes = len(collection.distinct("label", {"image_type": "processed"}))
-    print(f"Found {num_classes} unique classes in the dataset.")
-    return num_classes
 
 
 def create_model(num_classes: int) -> Model:
@@ -52,7 +40,6 @@ def create_model(num_classes: int) -> Model:
         activation="softmax",
         kernel_regularizer=tf.keras.regularizers.l2(0.01),
         name="output-layer",
-        dtype=tf.float32,  # Ensure final layer is float32 for stability
     )(x)
     model = Model(inputs, outputs)
 
@@ -64,56 +51,142 @@ def create_model(num_classes: int) -> Model:
     return model
 
 
-def data_generator(
-    split: str, batch_size: int, num_classes: int
-) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
-    def generator():
-        data_cursor = collection.find({"set_type": split, "image_type": "processed"})
-        X, y = [], []
-        for item in data_cursor:
-            # Read the image
-            image_data = fs.get(item["image_id"]).read()
-            image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            img_array = np.array(image) / 255.0  # Normalize to [0, 1]
+def decode_image(image_data):
+    image = Image.open(io.BytesIO(image_data)).convert("RGB")
+    img_array = np.array(image) / 255.0
+    return img_array
 
-            # Get the label directly
+
+def one_hot_encode_label(label, num_classes):
+    return tf.one_hot(label, num_classes)
+
+
+def load_dataset(split: str, batch_size: int, shuffle_buffer_size: int):
+    data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
+
+    def gen():
+        for item in data_cursor:
+            image_data = fs.get(item["image_id"]).read()
+            img_array = decode_image(image_data)
+            label = item["label"]
+            yield img_array, label
+
+    dataset = tf.data.Dataset.from_generator(
+        gen,
+        output_signature=(
+            tf.TensorSpec(shape=(299, 299, 3), dtype=tf.float32),
+            tf.TensorSpec(shape=(), dtype=tf.int32),
+        ),
+    )
+
+    num_classes = len(
+        collection.distinct("label", {"set_type": split, "image_type": "processed"})
+    )
+
+    dataset = dataset.map(lambda x, y: (x, one_hot_encode_label(y, num_classes)))
+    dataset = (
+        dataset.shuffle(shuffle_buffer_size)
+        .repeat()
+        .batch(batch_size)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    total_items = len(data_cursor)
+    steps_per_epoch = total_items // batch_size
+
+    return dataset, num_classes, steps_per_epoch
+
+
+def save_dataset_to_tfrecord(split: str, tfrecord_path: str):
+    data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
+
+    with tf.io.TFRecordWriter(tfrecord_path) as writer:
+        for item in data_cursor:
+            image_data = fs.get(item["image_id"]).read()
+            img_array = decode_image(image_data)
+            img_array = (img_array * 255).astype(np.uint8)  # Convert to uint8
             label = item["label"]
 
-            X.append(img_array)
-            y.append(label)
-            if len(X) == batch_size:
-                X_batch = np.array(X)
-                y_batch = to_categorical(np.array(y), num_classes=num_classes)
-                yield X_batch, y_batch
-                X, y = [], []  # Reset for the next batch
-        if len(X) > 0:
-            X_batch = np.array(X)
-            y_batch = to_categorical(np.array(y), num_classes=num_classes)
-            yield X_batch, y_batch
+            feature = {
+                "image": tf.train.Feature(
+                    bytes_list=tf.train.BytesList(
+                        value=[
+                            tf.io.encode_jpeg(tf.convert_to_tensor(img_array)).numpy()
+                        ]
+                    )
+                ),
+                "label": tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
+            }
 
-    return itertools.cycle(generator())
+            example = tf.train.Example(features=tf.train.Features(feature=feature))
+            writer.write(example.SerializeToString())
 
 
-def count_samples(split: str) -> int:
-    sample_count = collection.count_documents(
-        {"set_type": split, "image_type": "processed"}
+def parse_tfrecord(tfrecord):
+    feature_description = {
+        "image": tf.io.FixedLenFeature([], tf.string),
+        "label": tf.io.FixedLenFeature([], tf.int64),
+    }
+
+    example = tf.io.parse_single_example(tfrecord, feature_description)
+    image = tf.io.decode_jpeg(example["image"])
+    image = tf.image.convert_image_dtype(image, tf.float32)  # Convert to float32
+    label = example["label"]
+    return image, label
+
+
+def load_tfrecord_dataset(
+    tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
+):
+    dataset = tf.data.TFRecordDataset(tfrecord_path)
+    dataset = dataset.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
+    dataset = dataset.map(lambda x, y: (x, one_hot_encode_label(y, num_classes)))
+    dataset = (
+        dataset.shuffle(shuffle_buffer_size)
+        .repeat()
+        .batch(batch_size)
+        .prefetch(tf.data.AUTOTUNE)
     )
-    print(f"Found {sample_count} samples for split '{split}'.")
-    return sample_count
+    return dataset
 
 
 def train_and_evaluate_model() -> None:
     print("Starting model training...")
 
     batch_size = 16
-    num_classes = get_num_classes()
-    print(f"Number of classes: {num_classes}")
+    shuffle_buffer_size = 2048
+    train_tfrecord_path = "train.tfrecord"
+    val_tfrecord_path = "val.tfrecord"
+    test_tfrecord_path = "test.tfrecord"
 
-    train_steps = count_samples("train") // batch_size
-    val_steps = count_samples("val") // batch_size
+    # Save datasets to TFRecord
+    save_dataset_to_tfrecord("train", train_tfrecord_path)
+    save_dataset_to_tfrecord("val", val_tfrecord_path)
+    save_dataset_to_tfrecord("test", test_tfrecord_path)
 
-    train_generator = data_generator("train", batch_size, num_classes)
-    val_generator = data_generator("val", batch_size, num_classes)
+    # Number of classes
+    num_classes = len(
+        collection.distinct("label", {"set_type": "train", "image_type": "processed"})
+    )
+
+    train_dataset = load_tfrecord_dataset(
+        train_tfrecord_path, batch_size, shuffle_buffer_size, num_classes
+    )
+    val_dataset = load_tfrecord_dataset(
+        val_tfrecord_path, batch_size, shuffle_buffer_size, num_classes
+    )
+    test_dataset = load_tfrecord_dataset(
+        test_tfrecord_path, batch_size, shuffle_buffer_size, num_classes
+    )
+
+    total_items_train = sum(1 for _ in tf.data.TFRecordDataset(train_tfrecord_path))
+    steps_per_epoch_train = total_items_train // batch_size
+
+    total_items_val = sum(1 for _ in tf.data.TFRecordDataset(val_tfrecord_path))
+    steps_per_epoch_val = total_items_val // batch_size
+
+    total_items_test = sum(1 for _ in tf.data.TFRecordDataset(test_tfrecord_path))
+    steps_per_epoch_test = total_items_test // batch_size
 
     model = create_model(num_classes)
 
@@ -121,22 +194,23 @@ def train_and_evaluate_model() -> None:
     reduce_lr = ReduceLROnPlateau(
         monitor="val_loss", factor=0.2, patience=2, min_lr=0.00001
     )
+
     early_stopping = EarlyStopping(
         monitor="val_loss", patience=5, restore_best_weights=True
     )
 
     print("Training with frozen base model...")
     model.fit(
-        train_generator,
-        steps_per_epoch=train_steps,
+        train_dataset,
         epochs=2,
-        validation_data=val_generator,
-        validation_steps=val_steps,
+        validation_data=val_dataset,
+        steps_per_epoch=steps_per_epoch_train,
+        validation_steps=steps_per_epoch_val,
         callbacks=[reduce_lr, early_stopping],
     )
 
     print("Fine-tuning the model...")
-    base_model = model.layers[1]  # Assuming base model is the second layer
+    base_model = model.layers[1]
     base_model.trainable = True
     for layer in base_model.layers[:-20]:
         layer.trainable = False
@@ -148,24 +222,30 @@ def train_and_evaluate_model() -> None:
     )
 
     model.fit(
-        train_generator,
-        steps_per_epoch=train_steps,
+        train_dataset,
         epochs=20,
-        validation_data=val_generator,
-        validation_steps=val_steps,
+        validation_data=val_dataset,
+        steps_per_epoch=steps_per_epoch_train,
+        validation_steps=steps_per_epoch_val,
         callbacks=[reduce_lr, early_stopping],
     )
-    gc.collect()
-    keras.backend.clear_session()
-    print("Model training complete. Loading test data...")
-    test_generator = data_generator("test", batch_size, num_classes)
-    test_steps = count_samples("test") // batch_size
+
     print("Evaluating on test data...")
-    test_loss, test_accuracy = model.evaluate(test_generator, steps=test_steps)
+    test_loss, test_accuracy = model.evaluate(test_dataset, steps=steps_per_epoch_test)
     print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+
     print("Saving model...")
     model.save("model.h5")
 
 
 if __name__ == "__main__":
+    # Configure TensorFlow for optimal GPU usage
+    gpus = tf.config.experimental.list_physical_devices("GPU")
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(e)
+
     train_and_evaluate_model()
