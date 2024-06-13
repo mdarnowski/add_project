@@ -136,5 +136,15 @@ def get_progress():
     return progress
 
 
+@app.post("/trigger_processing")
+def trigger_processing():
+    connection = connect_to_rabbitmq()
+    channel = connection.channel()
+    channel.queue_declare(queue="trigger_queue")
+    channel.basic_publish(exchange="", routing_key="trigger_queue", body="")
+    connection.close()
+    return {"message": "Image processing triggered"}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

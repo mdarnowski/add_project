@@ -41,6 +41,8 @@
 <body>
     <h1>Bird Dataset</h1>
 
+    <button id="triggerButton">Go! go! produce</button>
+
     <div id="progress-container">
         <div id="progress-bar">0%</div>
     </div>
@@ -68,6 +70,8 @@
         </select>
         <button type="submit">Search</button>
     </form>
+
+
     <div id="results"></div>
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
     <script src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
@@ -81,6 +85,17 @@
                 $.get('/search', { image_type: image_type, species: species, set_type: set_type }, function(data) {
                     $('#results').html(data);
                 });
+            });
+
+            $('#triggerButton').on('click', function() {
+                fetch('/trigger_processing', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        alert(data.message);
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
             });
 
             function fetchProgress() {
