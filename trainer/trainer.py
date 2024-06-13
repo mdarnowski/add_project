@@ -124,13 +124,6 @@ def train_and_evaluate_model() -> None:
         test_tfrecord_path, batch_size, shuffle_buffer_size, num_classes
     )
 
-    # Debug: Inspect the datasets
-    try:
-        sample = tf.data.experimental.get_single_element(train_dataset)
-        print("Sample from train_dataset:", sample)
-    except Exception as e:
-        print("Error fetching sample from train_dataset:", e)
-
     total_items_train = sum(1 for _ in tf.data.TFRecordDataset(train_tfrecord_path))
     steps_per_epoch_train = total_items_train // batch_size
 
