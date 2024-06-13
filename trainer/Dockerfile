@@ -9,11 +9,12 @@ RUN apt-get update && \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy your application files to the container
-COPY . /app
-
 # Set the working directory
 WORKDIR /app
+
+# Copy your application files to the container
+COPY trainer.py /app/
+COPY model.h5 /app/
 
 # Set the environment variable to suppress TensorFlow warnings
 ENV TF_CPP_MIN_LOG_LEVEL=2
