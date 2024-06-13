@@ -3,7 +3,6 @@ import time
 
 import numpy as np
 import pika
-import tensorflow as tf
 from pymongo import MongoClient
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Dense, Dropout, Flatten

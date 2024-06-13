@@ -43,22 +43,15 @@ class RabbitMQProcessor:
             if data["split"] == "train":
                 transform = transforms.Compose(
                     [
-                        transforms.Resize([256, 256]),
-                        transforms.CenterCrop([224, 224]),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.RandomVerticalFlip(),
-                        transforms.RandomRotation(20),
-                        transforms.ColorJitter(
-                            brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1
-                        ),
+                        transforms.Resize([299, 299]),
+                        transforms.CenterCrop(299),
                         transforms.ToTensor(),
                     ]
                 )
             else:  # val or test
                 transform = transforms.Compose(
                     [
-                        transforms.Resize([256, 256]),
-                        transforms.Resize([224, 224]),
+                        transforms.Resize([299, 299]),
                         transforms.ToTensor(),
                     ]
                 )
