@@ -1,7 +1,5 @@
-import io
-import numpy as np
+import os
 import tensorflow as tf
-from PIL import Image
 from pymongo import MongoClient
 from tensorflow.keras.applications.inception_v3 import InceptionV3
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -14,16 +12,16 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 import gridfs
 
-
 # Enable mixed precision
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
 
 # MongoDB setup
-MONGO_URI = "mongodb://127.0.0.1:27017/"
+MONGO_URI = "mongodb://mongodb:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 collection = db.images
 fs = gridfs.GridFS(db)
+model_path = "model.h5"
 
 
 def create_model(num_classes: int) -> Model:
@@ -51,77 +49,6 @@ def create_model(num_classes: int) -> Model:
     return model
 
 
-def decode_image(image_data):
-    image = Image.open(io.BytesIO(image_data)).convert("RGB")
-    img_array = np.array(image) / 255.0
-    return img_array
-
-
-def one_hot_encode_label(label, num_classes):
-    return tf.one_hot(label, num_classes)
-
-
-def load_dataset(split: str, batch_size: int, shuffle_buffer_size: int):
-    data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
-
-    def gen():
-        for item in data_cursor:
-            image_data = fs.get(item["image_id"]).read()
-            img_array = decode_image(image_data)
-            label = item["label"]
-            yield img_array, label
-
-    dataset = tf.data.Dataset.from_generator(
-        gen,
-        output_signature=(
-            tf.TensorSpec(shape=(299, 299, 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(), dtype=tf.int32),
-        ),
-    )
-
-    num_classes = len(
-        collection.distinct("label", {"set_type": split, "image_type": "processed"})
-    )
-
-    dataset = dataset.map(lambda x, y: (x, one_hot_encode_label(y, num_classes)))
-    dataset = (
-        dataset.shuffle(shuffle_buffer_size)
-        .repeat()
-        .batch(batch_size)
-        .prefetch(tf.data.AUTOTUNE)
-    )
-
-    total_items = len(data_cursor)
-    steps_per_epoch = total_items // batch_size
-
-    return dataset, num_classes, steps_per_epoch
-
-
-def save_dataset_to_tfrecord(split: str, tfrecord_path: str):
-    data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
-
-    with tf.io.TFRecordWriter(tfrecord_path) as writer:
-        for item in data_cursor:
-            image_data = fs.get(item["image_id"]).read()
-            img_array = decode_image(image_data)
-            img_array = (img_array * 255).astype(np.uint8)  # Convert to uint8
-            label = item["label"]
-
-            feature = {
-                "image": tf.train.Feature(
-                    bytes_list=tf.train.BytesList(
-                        value=[
-                            tf.io.encode_jpeg(tf.convert_to_tensor(img_array)).numpy()
-                        ]
-                    )
-                ),
-                "label": tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
-            }
-
-            example = tf.train.Example(features=tf.train.Features(feature=feature))
-            writer.write(example.SerializeToString())
-
-
 def parse_tfrecord(tfrecord):
     feature_description = {
         "image": tf.io.FixedLenFeature([], tf.string),
@@ -140,7 +67,7 @@ def load_tfrecord_dataset(
 ):
     dataset = tf.data.TFRecordDataset(tfrecord_path)
     dataset = dataset.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
-    dataset = dataset.map(lambda x, y: (x, one_hot_encode_label(y, num_classes)))
+    dataset = dataset.map(lambda x, y: (x, tf.one_hot(y, num_classes)))
     dataset = (
         dataset.shuffle(shuffle_buffer_size)
         .repeat()
@@ -148,6 +75,25 @@ def load_tfrecord_dataset(
         .prefetch(tf.data.AUTOTUNE)
     )
     return dataset
+
+
+def download_data_and_save_to_tfrecord(split: str, tfrecord_path: str):
+    data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
+
+    with tf.io.TFRecordWriter(tfrecord_path) as writer:
+        for item in data_cursor:
+            image_data = fs.get(item["image_id"]).read()
+            label = item["label"]
+
+            feature = {
+                "image": tf.train.Feature(
+                    bytes_list=tf.train.BytesList(value=[image_data])
+                ),
+                "label": tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
+            }
+
+            example = tf.train.Example(features=tf.train.Features(feature=feature))
+            writer.write(example.SerializeToString())
 
 
 def train_and_evaluate_model() -> None:
@@ -159,12 +105,11 @@ def train_and_evaluate_model() -> None:
     val_tfrecord_path = "val.tfrecord"
     test_tfrecord_path = "test.tfrecord"
 
-    # Save datasets to TFRecord
-    save_dataset_to_tfrecord("train", train_tfrecord_path)
-    save_dataset_to_tfrecord("val", val_tfrecord_path)
-    save_dataset_to_tfrecord("test", test_tfrecord_path)
+    # Download and save datasets to TFRecord
+    download_data_and_save_to_tfrecord("train", train_tfrecord_path)
+    download_data_and_save_to_tfrecord("val", val_tfrecord_path)
+    download_data_and_save_to_tfrecord("test", test_tfrecord_path)
 
-    # Number of classes
     num_classes = len(
         collection.distinct("label", {"set_type": "train", "image_type": "processed"})
     )
@@ -178,6 +123,13 @@ def train_and_evaluate_model() -> None:
     test_dataset = load_tfrecord_dataset(
         test_tfrecord_path, batch_size, shuffle_buffer_size, num_classes
     )
+
+    # Debug: Inspect the datasets
+    try:
+        sample = tf.data.experimental.get_single_element(train_dataset)
+        print("Sample from train_dataset:", sample)
+    except Exception as e:
+        print("Error fetching sample from train_dataset:", e)
 
     total_items_train = sum(1 for _ in tf.data.TFRecordDataset(train_tfrecord_path))
     steps_per_epoch_train = total_items_train // batch_size
@@ -200,14 +152,18 @@ def train_and_evaluate_model() -> None:
     )
 
     print("Training with frozen base model...")
-    model.fit(
-        train_dataset,
-        epochs=2,
-        validation_data=val_dataset,
-        steps_per_epoch=steps_per_epoch_train,
-        validation_steps=steps_per_epoch_val,
-        callbacks=[reduce_lr, early_stopping],
-    )
+
+    try:
+        model.fit(
+            train_dataset,
+            epochs=2,
+            validation_data=val_dataset,
+            steps_per_epoch=steps_per_epoch_train,
+            validation_steps=steps_per_epoch_val,
+            callbacks=[reduce_lr, early_stopping],
+        )
+    except Exception as e:
+        print("Error during model.fit:", e)
 
     print("Fine-tuning the model...")
     base_model = model.layers[1]
@@ -234,8 +190,13 @@ def train_and_evaluate_model() -> None:
     test_loss, test_accuracy = model.evaluate(test_dataset, steps=steps_per_epoch_test)
     print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
 
+    # Check if the model file exists and remove it if so
+    if os.path.exists(model_path):
+        print(f"Removing existing model at {model_path}...")
+        os.remove(model_path)
+
     print("Saving model...")
-    model.save("model.h5")
+    model.save(model_path)
 
 
 if __name__ == "__main__":

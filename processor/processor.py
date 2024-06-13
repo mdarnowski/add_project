@@ -5,10 +5,11 @@ import os
 import time
 
 import pika
-import torchvision.transforms as transforms
+import numpy as np
 from loguru import logger
 from pika.exceptions import AMQPConnectionError, ConnectionClosed
 from PIL import Image
+import tensorflow as tf
 
 
 class RabbitMQProcessor:
@@ -35,6 +36,19 @@ class RabbitMQProcessor:
                 logger.warning("RabbitMQ not available, retrying in 5 seconds...")
                 time.sleep(5)
 
+    def transform_image(self, image_data, split):
+        image = Image.open(io.BytesIO(image_data)).convert("RGB")
+        img_array = np.array(image)
+
+        if split == "train":
+            img_array = tf.image.resize(img_array, [299, 299])
+        else:  # val or test
+            img_array = tf.image.resize(img_array, [299, 299])
+
+        img_array = tf.cast(img_array, tf.float32) / 255.0
+
+        return img_array
+
     def send_to_queue(self, data: dict):
         try:
             if self.channel is None or self.channel.is_closed:
@@ -43,34 +57,14 @@ class RabbitMQProcessor:
             image_path = data["image_path"]
             image_data = base64.b64decode(data["image_data"])
 
-            # Load image
-            image = Image.open(io.BytesIO(image_data))
+            # Transform image
+            img_array = self.transform_image(image_data, data["split"])
 
-            if data["split"] == "train":
-                transform = transforms.Compose(
-                    [
-                        transforms.Resize([299, 299]),
-                        transforms.CenterCrop(299),
-                        transforms.ToTensor(),
-                    ]
-                )
-            else:  # val or test
-                transform = transforms.Compose(
-                    [
-                        transforms.Resize([299, 299]),
-                        transforms.ToTensor(),
-                    ]
-                )
-
-            # Apply transformations
-            transformed_image = transform(image)
-
-            # Convert tensor to PIL Image for saving
-            transformed_image = transforms.ToPILImage()(transformed_image)
-
-            # Save transformed image
+            # Convert back to bytes
+            img_array = (img_array * 255).numpy().astype(np.uint8)
+            image = Image.fromarray(img_array)
             image_bytes = io.BytesIO()
-            transformed_image.save(image_bytes, format="JPEG")
+            image.save(image_bytes, format="JPEG")
 
             processed_message = {
                 "image_path": image_path,
@@ -101,6 +95,7 @@ class RabbitMQProcessor:
 
         def callback(ch, method, properties, body):
             message = json.loads(body)
+            logger.info(f"Received message for image_path: {message['image_path']}")
             self.send_to_queue(message)
             logger.info(
                 f"Processed and sent message for image_path: {message['image_path']}"
