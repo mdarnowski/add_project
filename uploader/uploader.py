@@ -1,100 +1,96 @@
 import base64
 import json
+import os
 import time
 
 import gridfs
 import pika
 import pymongo
-from bson import ObjectId
 from loguru import logger
+from pika.exceptions import AMQPConnectionError, ConnectionClosed
 from pymongo import MongoClient
 
-# MongoDB configuration
-MONGO_URI = "mongodb://mongodb:27017/"
-client = MongoClient(MONGO_URI)
-db = client.bird_dataset
-fs = gridfs.GridFS(db)
-images_collection = db.images
 
-# Create indexes for efficient querying
-images_collection.create_index([("species", pymongo.ASCENDING)])
-images_collection.create_index([("set_type", pymongo.ASCENDING)])
-images_collection.create_index([("image_type", pymongo.ASCENDING)])
-images_collection.create_index([("label", pymongo.ASCENDING)])
+class ImageUploader:
+    def __init__(self) -> None:
+        self.mongo_uri = os.getenv("MONGO_HOST", "mongodb://localhost:27017/")
+        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
+        self.client = MongoClient(self.mongo_uri)
+        self.db = self.client.bird_dataset
+        self.fs = gridfs.GridFS(self.db)
+        self.images_collection = self.db.images
+        self._create_indexes()
+        self.connection = None
+        self.channel = None
+        self.connect_to_rabbitmq()
 
+    def _create_indexes(self) -> None:
+        self.images_collection.create_index([("species", pymongo.ASCENDING)])
+        self.images_collection.create_index([("set_type", pymongo.ASCENDING)])
+        self.images_collection.create_index([("image_type", pymongo.ASCENDING)])
+        self.images_collection.create_index([("label", pymongo.ASCENDING)])
 
-# Connect to RabbitMQ
-def connect_to_rabbitmq() -> pika.BlockingConnection:
-    while True:
+    def connect_to_rabbitmq(self) -> None:
+        while True:
+            try:
+                self.connection = pika.BlockingConnection(
+                    pika.ConnectionParameters(self.rabbitmq_host)
+                )
+                self.channel = self.connection.channel()
+                self.channel.queue_declare(queue="raw_image_queue_uploader")
+                self.channel.queue_declare(queue="processed_image_queue")
+                logger.info("Connected to RabbitMQ.")
+                break
+            except AMQPConnectionError:
+                logger.warning("RabbitMQ not available, retrying in 5 seconds...")
+                time.sleep(5)
+
+    def process_and_save(self, body: bytes, image_type: str) -> None:
         try:
-            conn = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
-            logger.info("Connected to RabbitMQ.")
-            return conn
-        except pika.exceptions.AMQPConnectionError:
-            logger.warning("RabbitMQ not available, retrying in 5 seconds...")
-            time.sleep(5)
+            message = json.loads(body)
+            image_data = base64.b64decode(message["image_data"])
+
+            image_id = self.fs.put(image_data, filename=message["image_path"])
+            self.images_collection.insert_one(
+                {
+                    "filename": message["image_path"],
+                    "image_id": image_id,
+                    "image_type": image_type,
+                    "species": message["species"],
+                    "set_type": message["split"],
+                    "label": message["label"],
+                }
+            )
+            logger.info(f"Saved image {message['image_path']} with ID: {image_id}")
+        except Exception as e:
+            logger.error(f"Error saving image: {e}")
+
+    def raw_callback(self, _ch, _method, _properties, body) -> None:
+        self.process_and_save(body, "raw")
+
+    def processed_callback(self, _ch, _method, _properties, body) -> None:
+        self.process_and_save(body, "processed")
+
+    def start_consuming(self) -> None:
+        while True:
+            try:
+                self.channel.basic_consume(
+                    queue="raw_image_queue_uploader",
+                    on_message_callback=self.raw_callback,
+                    auto_ack=True,
+                )
+                self.channel.basic_consume(
+                    queue="processed_image_queue",
+                    on_message_callback=self.processed_callback,
+                    auto_ack=True,
+                )
+                logger.info("Uploader is listening for messages...")
+                self.channel.start_consuming()
+            except (ConnectionClosed, AMQPConnectionError):
+                logger.warning("Connection lost, reconnecting...")
+                self.connect_to_rabbitmq()
 
 
-connection = connect_to_rabbitmq()
-channel = connection.channel()
-
-channel.queue_declare(queue="raw_image_queue_uploader")
-channel.queue_declare(queue="processed_image_queue")
-
-
-# Save image to GridFS and store metadata in a single collection
-def save_image_and_metadata(data: bytes, filename: str, metadata: dict) -> ObjectId:
-    try:
-        image_id = fs.put(data, filename=filename)
-        images_collection.insert_one(
-            {
-                "filename": filename,
-                "image_id": image_id,
-                "image_type": metadata["image_type"],
-                "species": metadata["species"],
-                "set_type": metadata["set_type"],
-                "label": metadata["label"],
-            }
-        )
-        logger.info(f"Saved image {filename} with ID: {image_id}")
-        return image_id
-    except Exception as e:
-        logger.error(f"Error saving image: {e}")
-        return None
-
-
-# Save raw image callback
-def raw_callback(ch, method, properties, body) -> None:
-    message = json.loads(body)
-    raw_image_data = base64.b64decode(message["image_data"])
-    metadata = {
-        "image_type": "raw",
-        "species": message["species"],
-        "set_type": message["split"],
-        "label": message["label"],
-    }
-    save_image_and_metadata(raw_image_data, message["image_path"], metadata)
-
-
-# Save processed image callback
-def processed_callback(ch, method, properties, body) -> None:
-    message = json.loads(body)
-    processed_image_data = base64.b64decode(message["processed_image_data"])
-    metadata = {
-        "image_type": "processed",
-        "species": message["species"],
-        "set_type": message["split"],
-        "label": message["label"],
-    }
-    save_image_and_metadata(processed_image_data, message["image_path"], metadata)
-
-
-channel.basic_consume(
-    queue="raw_image_queue_uploader", on_message_callback=raw_callback, auto_ack=True
-)
-channel.basic_consume(
-    queue="processed_image_queue", on_message_callback=processed_callback, auto_ack=True
-)
-
-logger.info("Uploader is listening for messages...")
-channel.start_consuming()
+if __name__ == "__main__":
+    uploader = ImageUploader()
+    uploader.start_consuming()

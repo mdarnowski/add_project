@@ -1,17 +1,23 @@
 import base64
 import io
 import json
+import os
 import time
 
 import pika
 import torchvision.transforms as transforms
 from loguru import logger
-from pika.exceptions import AMQPConnectionError
+from pika.exceptions import AMQPConnectionError, ConnectionClosed
 from PIL import Image
 
 
 class RabbitMQProcessor:
     def __init__(self):
+        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
+        self.raw_image_queue = os.getenv("RAW_IMAGE_QUEUE", "raw_image_queue")
+        self.processed_image_queue = os.getenv(
+            "PROCESSED_IMAGE_QUEUE", "processed_image_queue"
+        )
         self.connection = None
         self.channel = None
         self.connect_to_rabbitmq()
@@ -20,10 +26,10 @@ class RabbitMQProcessor:
         while self.connection is None or self.connection.is_closed:
             try:
                 self.connection = pika.BlockingConnection(
-                    pika.ConnectionParameters("rabbitmq")
+                    pika.ConnectionParameters(self.rabbitmq_host)
                 )
                 self.channel = self.connection.channel()
-                self.channel.queue_declare(queue="processed_image_queue")
+                self.channel.queue_declare(queue=self.processed_image_queue)
                 logger.info("Connected to RabbitMQ.")
             except AMQPConnectionError:
                 logger.warning("RabbitMQ not available, retrying in 5 seconds...")
@@ -75,9 +81,7 @@ class RabbitMQProcessor:
 
             processed_message = {
                 "image_path": image_path,
-                "processed_image_data": base64.b64encode(image_bytes.getvalue()).decode(
-                    "utf-8"
-                ),
+                "image_data": base64.b64encode(image_bytes.getvalue()).decode("utf-8"),
                 "label": data["label"],
                 "split": data["split"],
                 "species": data["species"],
@@ -85,14 +89,14 @@ class RabbitMQProcessor:
 
             self.channel.basic_publish(
                 exchange="",
-                routing_key="processed_image_queue",
+                routing_key=self.processed_image_queue,
                 body=json.dumps(processed_message),
             )
             logger.info(f"Sent processed message for image_path: {image_path} to queue")
 
         except Exception as e:
             logger.error(f"Error processing image. Error: {e}")
-            if isinstance(e, AMQPConnectionError):
+            if isinstance(e, AMQPConnectionError) or isinstance(e, ConnectionClosed):
                 logger.error("Connection lost, attempting to reconnect...")
                 self.connect_to_rabbitmq()
 
@@ -100,7 +104,7 @@ class RabbitMQProcessor:
         if self.channel is None or self.channel.is_closed:
             self.connect_to_rabbitmq()
 
-        self.channel.queue_declare(queue="raw_image_queue")
+        self.channel.queue_declare(queue=self.raw_image_queue)
 
         def callback(ch, method, properties, body):
             message = json.loads(body)
@@ -110,7 +114,7 @@ class RabbitMQProcessor:
             )
 
         self.channel.basic_consume(
-            queue="raw_image_queue", on_message_callback=callback, auto_ack=True
+            queue=self.raw_image_queue, on_message_callback=callback, auto_ack=True
         )
         logger.info("Processor is listening for messages...")
         self.channel.start_consuming()
