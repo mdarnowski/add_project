@@ -7,7 +7,6 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 from pymongo import MongoClient
-# Import ResNet50V2 and preprocessing function
 from tensorflow.keras.applications.inception_v3 import (InceptionV3,
                                                         preprocess_input)
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -25,9 +24,10 @@ fs = gridfs.GridFS(db)
 
 
 def create_model(num_classes: int) -> Model:
-    # BEST RESNET101V2, RESNET50V2 but slow
-    # Inceptionv3 fastesst and not bad
-    # Propably need data augmention
+    # All with 70 bird types
+    # BEST RESNET101V2(64% acc, RESNET50V2(55% acc) but slow
+    # Inception3(55% acc) fastest and not bad
+    # Probably need data augmentation
     base_model = InceptionV3(include_top=False, input_shape=(224, 224, 3))
     base_model.trainable = False
 
