@@ -60,6 +60,22 @@ services:
     networks:
       - app-network
 
+
+  receiver:
+    build:
+      context: ./receiver
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
+    depends_on:
+      - rabbitmq
+      - mongodb
+    volumes:
+      - ./receiver:/app
+    networks:
+      - app-network
+
   presenter:
     build:
       context: ./presenter
