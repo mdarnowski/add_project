@@ -1,3 +1,52 @@
+"""
+Web Application Module
+================================
+
+This module provides a web application for managing and processing images using FastAPI.
+It integrates with RabbitMQ for messaging and MongoDB/GridFS for image storage.
+
+Modules
+-------
+
+- `base64`
+- `json`
+- `logging`
+- `threading`
+- `time`
+- `gridfs`
+- `pika`
+- `uvicorn`
+- `fastapi`
+- `fastapi.middleware.cors`
+- `fastapi.responses`
+- `fastapi.templating`
+- `pika.exceptions`
+- `pymongo`
+
+Attributes
+----------
+
+- `MONGO_URI`: MongoDB connection URI.
+- `client`: MongoDB client.
+- `db`: MongoDB database.
+- `images_collection`: MongoDB collection for images.
+- `fs`: GridFS object for storing images.
+- `app`: FastAPI application instance.
+- `templates`: Jinja2Templates object for HTML rendering.
+- `progress`: Global dictionary to store processing progress.
+
+Functions
+---------
+
+- `connect_to_rabbitmq()`: Connect to RabbitMQ server with retry on failure.
+- `get_image(image_id)`: Retrieve image from GridFS and encode it in base64.
+- `consume_progress_updates()`: Consume progress updates from RabbitMQ.
+- `index(request: Request)`: Serve the main index page.
+- `search(request: Request, image_type: str, species: str, set_type: str)`: Serve the search results page.
+- `get_progress()`: Return current processing progress.
+- `trigger_processing()`: Trigger image processing via RabbitMQ.
+"""
+
 import base64
 import json
 import logging
@@ -45,8 +94,10 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
     """
     Connect to RabbitMQ server with retry on failure.
 
-    Returns:
-        pika.BlockingConnection: RabbitMQ connection object.
+    Returns
+    -------
+    pika.BlockingConnection
+        RabbitMQ connection object.
     """
     while True:
         try:
@@ -59,6 +110,19 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
 
 
 def get_image(image_id):
+    """
+    Retrieve image from GridFS and encode it in base64.
+
+    Parameters
+    ----------
+    image_id : ObjectId
+        The GridFS ObjectId of the image.
+
+    Returns
+    -------
+    str
+        Base64 encoded image data.
+    """
     if not image_id:
         return None
     image_data = fs.get(image_id).read()
@@ -66,6 +130,9 @@ def get_image(image_id):
 
 
 def consume_progress_updates():
+    """
+    Consume progress updates from RabbitMQ and update the global progress variable.
+    """
     global progress
     connection = connect_to_rabbitmq()
     channel = connection.channel()
@@ -89,6 +156,19 @@ threading.Thread(target=consume_progress_updates, daemon=True).start()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    """
+    Serve the main index page.
+
+    Parameters
+    ----------
+    request : Request
+        FastAPI request object.
+
+    Returns
+    -------
+    HTMLResponse
+        Rendered HTML page with species list.
+    """
     species_list = images_collection.distinct("species")
     return templates.TemplateResponse(
         "index.html", {"request": request, "species_list": species_list}
@@ -102,6 +182,25 @@ async def search(
     species: str = Query(None),
     set_type: str = Query(None),
 ):
+    """
+    Serve the search results page based on the query parameters.
+
+    Parameters
+    ----------
+    request : Request
+        FastAPI request object.
+    image_type : str, optional
+        Type of the image (e.g., "jpg", "png").
+    species : str, optional
+        Species of the bird.
+    set_type : str, optional
+        Set type (e.g., "train", "val").
+
+    Returns
+    -------
+    HTMLResponse
+        Rendered HTML page with search results.
+    """
     query = {}
     if image_type:
         query["image_type"] = image_type
@@ -133,11 +232,27 @@ async def search(
 
 @app.get("/progress")
 def get_progress():
+    """
+    Return current processing progress.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the processed and total counts.
+    """
     return progress
 
 
 @app.post("/trigger_processing")
 def trigger_processing():
+    """
+    Trigger image processing via RabbitMQ.
+
+    Returns
+    -------
+    dict
+        Confirmation message for triggering image processing.
+    """
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="trigger_queue")
