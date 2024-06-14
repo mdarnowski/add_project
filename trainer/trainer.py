@@ -6,25 +6,6 @@ This module provides functions for training a deep learning model using TensorFl
 It handles data retrieval via RabbitMQ, preparation of datasets in TFRecord format, model creation,
 training, and evaluation.
 
-Classes
--------
-- Trainer
-
-Dependencies
-------------
-- tensorflow
-- pika
-- json
-- base64
-- os
-
-Environment Variables
----------------------
-- RABBITMQ_HOST : str
-    The RabbitMQ host address (default: "localhost")
-- MODEL_PATH : str
-    The path where the trained model will be saved, defaulting to "model.h5".
-
 Functions
 ---------
 - `create_model(num_classes: int) -> tf.keras.models.Model`
@@ -33,8 +14,22 @@ Functions
     Parses a single TFRecord example into an image tensor and label.
 - `load_tfrecord_dataset(tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int)`
     Loads a TFRecord dataset and prepares it for training.
+- `download_data_and_save_to_tfrecord(split: str, tfrecord_path: str)`
+    Downloads data from MongoDB and saves it to a TFRecord file.
 - `train_and_evaluate_model() -> None`
     Trains and evaluates the model using the downloaded datasets.
+
+Environment Variables
+---------------------
+- `MONGO_URI` : str
+    MongoDB connection URI, defaulting to "mongodb://mongodb:27017/".
+- `model_path` : str
+    The path where the trained model will be saved, defaulting to "model.h5".
+
+Dependencies
+------------
+- tensorflow
+- pymongo
 """
 
 import os
@@ -43,9 +38,9 @@ import base64
 import time
 
 import tensorflow as tf
-import pika
+from pymongo import MongoClient
 from tensorflow.keras.applications.inception_v3 import InceptionV3
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, Callback
 from tensorflow.keras.layers import (
     BatchNormalization,
     Dense,
@@ -54,13 +49,79 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from loguru import logger
+import gridfs
+from datetime import datetime
+import pika
+import json
+
 
 # Enable mixed precision
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
 
+# RabbitMQ setup
+rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
+rabbitmq_queue = "training_updates"
+# MongoDB setup
+MONGO_URI = "mongodb://mongodb:27017/"
+client = MongoClient(MONGO_URI)
+db = client.bird_dataset
+collection = db.images
+fs = gridfs.GridFS(db)
+metrics_collection = db.metrics
+model_path = "model.keras"
 # Environment Variables
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
+
+
+class MongoDBLogger(Callback):
+    def __init__(self):
+        super().__init__()
+        self.training_id = metrics_collection.insert_one(
+            {"timestamp": datetime.now(), "epochs": []}
+        ).inserted_id
+        self.phase = None
+        self.connection = None
+        self.channel = None
+        self.connect_to_rabbitmq()
+
+    def connect_to_rabbitmq(self):
+        if self.connection and self.connection.is_open:
+            return
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=rabbitmq_host)
+        )
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=rabbitmq_queue)
+
+    def close_connection(self):
+        if self.connection and self.connection.is_open:
+            self.connection.close()
+
+    def on_epoch_end(self, epoch, logs=None):
+        epoch_metrics = {
+            "epoch": epoch,
+            "phase": self.phase,
+            "loss": logs.get("loss"),
+            "accuracy": logs.get("accuracy"),
+            "val_loss": logs.get("val_loss"),
+            "val_accuracy": logs.get("val_accuracy"),
+        }
+        metrics_collection.update_one(
+            {"_id": self.training_id}, {"$push": {"epochs": epoch_metrics}}
+        )
+
+        # Send simple message to RabbitMQ
+        message = {
+            "training_id": str(self.training_id),
+            "epoch": epoch,
+            "phase": self.phase,
+        }
+
+        self.connect_to_rabbitmq()
+        self.channel.basic_publish(
+            exchange="", routing_key=rabbitmq_queue, body=json.dumps(message)
+        )
 
 
 class Trainer:
@@ -235,7 +296,7 @@ class Trainer:
         self.save_to_tfrecord(split, f"{split}.tfrecord", image_data, label)
 
     def save_to_tfrecord(
-        self, split: str, tfrecord_path: str, image_data: bytes, label: int
+            self, split: str, tfrecord_path: str, image_data: bytes, label: int
     ) -> None:
         """
         Saves received images incrementally to a TFRecord file.
@@ -285,8 +346,8 @@ class Trainer:
                 logger.info("Trainer is listening for messages...")
                 self.channel.start_consuming()
             except (
-                pika.exceptions.ConnectionClosed,
-                pika.exceptions.AMQPConnectionError,
+                    pika.exceptions.ConnectionClosed,
+                    pika.exceptions.AMQPConnectionError,
             ):
                 logger.warning("Connection lost, reconnecting...")
                 self.connect_to_rabbitmq()
@@ -374,19 +435,21 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        logger.info("Training with frozen base model...")
+        mongo_logger = MongoDBLogger()
 
+        print("Training with frozen base model...")
+        mongo_logger.phase = "frozen"
         try:
             model.fit(
                 train_dataset,
-                epochs=20,
+                epochs=2,
                 validation_data=val_dataset,
                 steps_per_epoch=steps_per_epoch_train,
                 validation_steps=steps_per_epoch_val,
-                callbacks=[reduce_lr, early_stopping],
+                callbacks=[reduce_lr, early_stopping, mongo_logger],
             )
         except Exception as e:
-            logger.error(f"Error during model.fit: {e}")
+            print("Error during model.fit:", e)
 
         logger.info("Fine-tuning the model...")
         base_model = model.layers[1]
@@ -400,14 +463,17 @@ class Trainer:
             metrics=["accuracy"],
         )
 
+        mongo_logger.phase = "unfrozen"
         model.fit(
             train_dataset,
             epochs=20,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
-            callbacks=[reduce_lr, early_stopping],
+            callbacks=[reduce_lr, early_stopping, mongo_logger],
         )
+
+        mongo_logger.close_connection()
 
         logger.info("Evaluating on test data...")
         test_loss, test_accuracy = model.evaluate(
@@ -450,7 +516,7 @@ def parse_tfrecord(tfrecord):
 
 
 def load_tfrecord_dataset(
-    tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
+        tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
 ):
     """
     Load a TFRecord dataset and prepare it for training.
