@@ -1,3 +1,4 @@
 pymongo
 Pillow
 loguru
+pika

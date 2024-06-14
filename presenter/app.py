@@ -91,27 +91,28 @@ def get_image(image_id):
     return base64.b64encode(image_data).decode("utf-8")
 
 
-def consume_progress_updates():
-    global progress
+def consume_updates():
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="progress_queue")
+    channel.queue_declare(queue="training_updates")
 
     def callback(ch, method, properties, body):
-        progress_update = json.loads(body)
-        progress["processed"] = progress_update["processed"]
-        progress["total"] = progress_update["total"]
-        asyncio.run(manager.broadcast(json.dumps(progress_update)))
+        update = json.loads(body)
+        asyncio.run(manager.broadcast(json.dumps(update)))
 
     channel.basic_consume(
         queue="progress_queue", on_message_callback=callback, auto_ack=True
     )
-    logger.info("Started consuming progress updates...")
+    channel.basic_consume(
+        queue="training_updates", on_message_callback=callback, auto_ack=True
+    )
+    logger.info("Started consuming updates...")
     channel.start_consuming()
 
 
 # Start the consumer in a separate thread
-threading.Thread(target=consume_progress_updates, daemon=True).start()
+threading.Thread(target=consume_updates, daemon=True).start()
 
 
 @app.get("/", response_class=HTMLResponse)

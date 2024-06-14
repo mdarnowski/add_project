@@ -13,6 +13,7 @@ from tensorflow.keras.models import Model
 import gridfs
 from datetime import datetime
 import pika
+import json
 
 # Enable mixed precision
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
@@ -40,6 +41,7 @@ class MongoDBLogger(Callback):
         self.phase = None
         self.connection = None
         self.channel = None
+        self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
         if self.connection and self.connection.is_open:
@@ -76,7 +78,7 @@ class MongoDBLogger(Callback):
 
         self.connect_to_rabbitmq()
         self.channel.basic_publish(
-            exchange="", routing_key=rabbitmq_queue, body=str(message)
+            exchange="", routing_key=rabbitmq_queue, body=json.dumps(message)
         )
 
 
@@ -207,7 +209,7 @@ def train_and_evaluate_model() -> None:
     try:
         model.fit(
             train_dataset,
-            epochs=1,
+            epochs=2,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
@@ -231,7 +233,7 @@ def train_and_evaluate_model() -> None:
     mongo_logger.phase = "unfrozen"
     model.fit(
         train_dataset,
-        epochs=1,
+        epochs=2,
         validation_data=val_dataset,
         steps_per_epoch=steps_per_epoch_train,
         validation_steps=steps_per_epoch_val,

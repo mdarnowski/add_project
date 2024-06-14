@@ -209,8 +209,18 @@
             }
 
             const ws = new WebSocket(`ws://${window.location.host}/ws`);
-            ws.onmessage = function() {
+            ws.onopen = function() {
+                console.log("WebSocket connection opened");
+            };
+            ws.onmessage = function(event) {
+                console.log("WebSocket message received:", event.data);
                 fetchLatestMetrics();
+            };
+            ws.onerror = function(error) {
+                console.log("WebSocket error:", error);
+            };
+            ws.onclose = function() {
+                console.log("WebSocket connection closed");
             };
 
             // Initial fetch to populate the chart
