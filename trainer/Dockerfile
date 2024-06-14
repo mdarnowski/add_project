@@ -14,7 +14,7 @@ WORKDIR /app
 
 # Copy your application files to the container
 COPY trainer.py /app/
-
+COPY model.h5 /app/
 
 # Set the environment variable to suppress TensorFlow warnings
 ENV TF_CPP_MIN_LOG_LEVEL=2

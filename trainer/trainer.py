@@ -1,3 +1,37 @@
+"""
+Trainer Module
+==============
+
+This module provides functions for training a deep learning model using TensorFlow and Keras.
+It handles data retrieval from MongoDB, preparation of datasets in TFRecord format, model creation,
+training, and evaluation.
+
+Functions
+---------
+- `create_model(num_classes: int) -> tf.keras.models.Model`
+    Creates and compiles a Keras model using InceptionV3 as the base model.
+- `parse_tfrecord(tfrecord)`
+    Parses a single TFRecord example into an image tensor and label.
+- `load_tfrecord_dataset(tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int)`
+    Loads a TFRecord dataset and prepares it for training.
+- `download_data_and_save_to_tfrecord(split: str, tfrecord_path: str)`
+    Downloads data from MongoDB and saves it to a TFRecord file.
+- `train_and_evaluate_model() -> None`
+    Trains and evaluates the model using the downloaded datasets.
+
+Environment Variables
+---------------------
+- `MONGO_URI` : str
+    MongoDB connection URI, defaulting to "mongodb://mongodb:27017/".
+- `model_path` : str
+    The path where the trained model will be saved, defaulting to "model.h5".
+
+Dependencies
+------------
+- tensorflow
+- pymongo
+"""
+
 import os
 import tensorflow as tf
 from pymongo import MongoClient
@@ -83,6 +117,21 @@ class MongoDBLogger(Callback):
 
 
 def create_model(num_classes: int) -> Model:
+    """
+    Create and compile a Keras model using InceptionV3 as the base model.
+
+    :param num_classes: The number of output classes.
+    :type num_classes: int
+    :return: The compiled Keras model.
+    :rtype: tensorflow.keras.models.Model
+
+    The model consists of:
+    - InceptionV3 base model without the top layer, with weights frozen
+    - Global Average Pooling layer
+    - Batch Normalization layer
+    - Dropout layer with 50% dropout rate
+    - Dense output layer with softmax activation and L2 regularization
+    """
     base_model = InceptionV3(include_top=False, input_shape=(299, 299, 3))
     base_model.trainable = False
 
@@ -108,6 +157,18 @@ def create_model(num_classes: int) -> Model:
 
 
 def parse_tfrecord(tfrecord):
+    """
+    Parse a single TFRecord example.
+
+    :param tfrecord: The TFRecord example to parse.
+    :type tfrecord: tf.train.Example
+    :return: A tuple containing the image tensor and the label.
+    :rtype: tuple (tensorflow.Tensor, int)
+
+    The function expects TFRecord examples to contain:
+    - image: A JPEG-encoded image
+    - label: An integer label
+    """
     feature_description = {
         "image": tf.io.FixedLenFeature([], tf.string),
         "label": tf.io.FixedLenFeature([], tf.int64),
@@ -123,6 +184,26 @@ def parse_tfrecord(tfrecord):
 def load_tfrecord_dataset(
     tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
 ):
+    """
+    Load a TFRecord dataset and prepare it for training.
+
+    :param tfrecord_path: The path to the TFRecord file.
+    :type tfrecord_path: str
+    :param batch_size: The batch size for training.
+    :type batch_size: int
+    :param shuffle_buffer_size: The buffer size for shuffling the dataset.
+    :type shuffle_buffer_size: int
+    :param num_classes: The number of output classes.
+    :type num_classes: int
+    :return: A prepared tf.data.Dataset object.
+    :rtype: tensorflow.data.Dataset
+
+    The dataset is:
+    - Parsed using `parse_tfrecord`
+    - One-hot encoded for the labels
+    - Shuffled and batched
+    - Prefetched for performance
+    """
     dataset = tf.data.TFRecordDataset(tfrecord_path)
     dataset = dataset.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
     dataset = dataset.map(lambda x, y: (x, tf.one_hot(y, num_classes)))
@@ -136,6 +217,18 @@ def load_tfrecord_dataset(
 
 
 def download_data_and_save_to_tfrecord(split: str, tfrecord_path: str):
+    """
+    Download data from MongoDB and save it to a TFRecord file.
+
+    :param split: The dataset split to download ('train', 'val', or 'test').
+    :type split: str
+    :param tfrecord_path: The path where the TFRecord file will be saved.
+    :type tfrecord_path: str
+
+    This function:
+    - Retrieves image data and labels from MongoDB based on the dataset split
+    - Writes the data to a TFRecord file
+    """
     data_cursor = list(collection.find({"set_type": split, "image_type": "processed"}))
 
     with tf.io.TFRecordWriter(tfrecord_path) as writer:
@@ -155,6 +248,16 @@ def download_data_and_save_to_tfrecord(split: str, tfrecord_path: str):
 
 
 def train_and_evaluate_model() -> None:
+    """
+    Train and evaluate the model.
+
+    This function:
+    - Downloads and saves the training, validation, and test datasets to TFRecord files
+    - Loads the datasets for training and evaluation
+    - Creates and trains the model with frozen and then fine-tuned InceptionV3 base
+    - Evaluates the model on the test dataset
+    - Saves the trained model to a file
+    """
     print("Starting model training...")
 
     batch_size = 16

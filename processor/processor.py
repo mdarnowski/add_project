@@ -1,3 +1,36 @@
+"""
+Image Processor Module
+========================
+
+This module provides functionality to process images through a RabbitMQ queue system.
+Images are received from a queue, transformed, and sent to another queue.
+
+Classes
+-------
+- RabbitMQProcessor
+
+Dependencies
+------------
+
+- base64
+- io
+- json
+- os
+- time
+- pika
+- numpy
+- loguru
+- PIL (Pillow)
+- tensorflow
+
+Configuration
+-------------
+
+- `RABBITMQ_HOST`: Environment variable for the RabbitMQ host. Defaults to "rabbitmq".
+- `RAW_IMAGE_QUEUE`: Environment variable for the raw image queue name. Defaults to "raw_image_queue".
+- `PROCESSED_IMAGE_QUEUE`: Environment variable for the processed image queue name. Defaults to "processed_image_queue".
+"""
+
 import base64
 import io
 import json
@@ -13,7 +46,41 @@ import tensorflow as tf
 
 
 class RabbitMQProcessor:
+    """
+    RabbitMQProcessor handles image processing and communication with RabbitMQ queues.
+
+    Attributes
+    ----------
+    rabbitmq_host : str
+        Hostname for RabbitMQ server.
+    raw_image_queue : str
+        Queue name for raw images.
+    processed_image_queue : str
+        Queue name for processed images.
+    connection : pika.BlockingConnection
+        Connection object for RabbitMQ.
+    channel : pika.channel.Channel
+        Channel object for RabbitMQ.
+
+    Methods
+    -------
+    connect_to_rabbitmq():
+        Establishes connection to RabbitMQ server.
+    transform_image(image_data, split):
+        Transforms the input image data according to the split type.
+    send_to_queue(data: dict):
+        Processes the image and sends the transformed image to the processed queue.
+    start_consuming():
+        Starts consuming messages from the raw image queue.
+    """
+
     def __init__(self):
+        """
+        Initializes the RabbitMQProcessor class.
+
+        Sets up the RabbitMQ host, raw image queue, and processed image queue
+        from environment variables or defaults.
+        """
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
         self.raw_image_queue = os.getenv("RAW_IMAGE_QUEUE", "raw_image_queue")
         self.processed_image_queue = os.getenv(
@@ -24,6 +91,11 @@ class RabbitMQProcessor:
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
+        """
+        Connects to RabbitMQ server and declares the processed image queue.
+
+        Retries connection every 5 seconds if initial connection fails.
+        """
         while self.connection is None or self.connection.is_closed:
             try:
                 self.connection = pika.BlockingConnection(
@@ -37,6 +109,21 @@ class RabbitMQProcessor:
                 time.sleep(5)
 
     def transform_image(self, image_data, split):
+        """
+        Transforms the input image data based on the split type.
+
+        Parameters
+        ----------
+        image_data : bytes
+            Base64 decoded image data.
+        split : str
+            The dataset split type. Can be 'train', 'val', or 'test'.
+
+        Returns
+        -------
+        numpy.ndarray
+            The transformed image array.
+        """
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
         img_array = np.array(image)
 
@@ -50,6 +137,14 @@ class RabbitMQProcessor:
         return img_array
 
     def send_to_queue(self, data: dict):
+        """
+        Processes the image and sends the transformed image to the processed queue.
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary containing image data, path, label, split, and species.
+        """
         try:
             if self.channel is None or self.channel.is_closed:
                 self.connect_to_rabbitmq()
@@ -88,6 +183,11 @@ class RabbitMQProcessor:
                 self.connect_to_rabbitmq()
 
     def start_consuming(self):
+        """
+        Starts consuming messages from the raw image queue and processes them.
+
+        Declares the raw image queue and sets up a callback to handle messages.
+        """
         if self.channel is None or self.channel.is_closed:
             self.connect_to_rabbitmq()
 
