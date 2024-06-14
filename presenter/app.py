@@ -3,16 +3,18 @@ import json
 import logging
 import threading
 import time
+import asyncio
 
 import gridfs
 import pika
 import uvicorn
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pika.exceptions import AMQPConnectionError
 from pymongo import MongoClient
+from typing import List
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +25,7 @@ MONGO_URI = "mongodb://mongodb:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 images_collection = db.images
+metrics_collection = db.metrics
 fs = gridfs.GridFS(db)
 
 app = FastAPI()
@@ -39,6 +42,29 @@ app.add_middleware(
 
 # Global variable to store the progress
 progress = {"processed": 0, "total": 0}
+
+
+# WebSocket manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+
+manager = ConnectionManager()
 
 
 def connect_to_rabbitmq() -> pika.BlockingConnection:
@@ -75,6 +101,7 @@ def consume_progress_updates():
         progress_update = json.loads(body)
         progress["processed"] = progress_update["processed"]
         progress["total"] = progress_update["total"]
+        asyncio.run(manager.broadcast(json.dumps(progress_update)))
 
     channel.basic_consume(
         queue="progress_queue", on_message_callback=callback, auto_ack=True
@@ -136,6 +163,15 @@ def get_progress():
     return progress
 
 
+@app.get("/latest_metrics")
+def get_latest_metrics():
+    latest_training = metrics_collection.find_one(sort=[("timestamp", -1)])
+    if latest_training:
+        return {"epochs": latest_training["epochs"]}
+    else:
+        return {"epochs": []}
+
+
 @app.post("/trigger_processing")
 def trigger_processing():
     connection = connect_to_rabbitmq()
@@ -144,6 +180,17 @@ def trigger_processing():
     channel.basic_publish(exchange="", routing_key="trigger_queue", body="")
     connection.close()
     return {"message": "Image processing triggered"}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.send_personal_message(f"You wrote: {data}", websocket)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 
 if __name__ == "__main__":

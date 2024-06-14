@@ -2,7 +2,7 @@ import os
 import tensorflow as tf
 from pymongo import MongoClient
 from tensorflow.keras.applications.inception_v3 import InceptionV3
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, Callback
 from tensorflow.keras.layers import (
     BatchNormalization,
     Dense,
@@ -11,6 +11,8 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 import gridfs
+from datetime import datetime
+import pika
 
 # Enable mixed precision
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
@@ -21,7 +23,61 @@ client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 collection = db.images
 fs = gridfs.GridFS(db)
-model_path = "model.h5"
+metrics_collection = db.metrics
+model_path = "model.keras"
+
+# RabbitMQ setup
+rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
+rabbitmq_queue = "training_updates"
+
+
+class MongoDBLogger(Callback):
+    def __init__(self):
+        super().__init__()
+        self.training_id = metrics_collection.insert_one(
+            {"timestamp": datetime.now(), "epochs": []}
+        ).inserted_id
+        self.phase = None
+        self.connection = None
+        self.channel = None
+
+    def connect_to_rabbitmq(self):
+        if self.connection and self.connection.is_open:
+            return
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=rabbitmq_host)
+        )
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=rabbitmq_queue)
+
+    def close_connection(self):
+        if self.connection and self.connection.is_open:
+            self.connection.close()
+
+    def on_epoch_end(self, epoch, logs=None):
+        epoch_metrics = {
+            "epoch": epoch,
+            "phase": self.phase,
+            "loss": logs.get("loss"),
+            "accuracy": logs.get("accuracy"),
+            "val_loss": logs.get("val_loss"),
+            "val_accuracy": logs.get("val_accuracy"),
+        }
+        metrics_collection.update_one(
+            {"_id": self.training_id}, {"$push": {"epochs": epoch_metrics}}
+        )
+
+        # Send simple message to RabbitMQ
+        message = {
+            "training_id": str(self.training_id),
+            "epoch": epoch,
+            "phase": self.phase,
+        }
+
+        self.connect_to_rabbitmq()
+        self.channel.basic_publish(
+            exchange="", routing_key=rabbitmq_queue, body=str(message)
+        )
 
 
 def create_model(num_classes: int) -> Model:
@@ -144,16 +200,18 @@ def train_and_evaluate_model() -> None:
         monitor="val_loss", patience=5, restore_best_weights=True
     )
 
-    print("Training with frozen base model...")
+    mongo_logger = MongoDBLogger()
 
+    print("Training with frozen base model...")
+    mongo_logger.phase = "frozen"
     try:
         model.fit(
             train_dataset,
-            epochs=2,
+            epochs=1,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
-            callbacks=[reduce_lr, early_stopping],
+            callbacks=[reduce_lr, early_stopping, mongo_logger],
         )
     except Exception as e:
         print("Error during model.fit:", e)
@@ -170,14 +228,17 @@ def train_and_evaluate_model() -> None:
         metrics=["accuracy"],
     )
 
+    mongo_logger.phase = "unfrozen"
     model.fit(
         train_dataset,
-        epochs=20,
+        epochs=1,
         validation_data=val_dataset,
         steps_per_epoch=steps_per_epoch_train,
         validation_steps=steps_per_epoch_val,
-        callbacks=[reduce_lr, early_stopping],
+        callbacks=[reduce_lr, early_stopping, mongo_logger],
     )
+
+    mongo_logger.close_connection()
 
     print("Evaluating on test data...")
     test_loss, test_accuracy = model.evaluate(test_dataset, steps=steps_per_epoch_test)
@@ -189,7 +250,7 @@ def train_and_evaluate_model() -> None:
         os.remove(model_path)
 
     print("Saving model...")
-    model.save(model_path)
+    model.save(model_path, save_format="keras")
 
 
 if __name__ == "__main__":

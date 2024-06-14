@@ -36,6 +36,10 @@
             color: white;
             border-radius: 5px;
         }
+        #training-chart-container {
+            width: 100%;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
@@ -45,6 +49,10 @@
 
     <div id="progress-container">
         <div id="progress-bar">0%</div>
+    </div>
+
+    <div id="training-chart-container">
+        <canvas id="trainingChart" width="400" height="200"></canvas>
     </div>
 
     <form id="search-form">
@@ -71,10 +79,11 @@
         <button type="submit">Search</button>
     </form>
 
-
     <div id="results"></div>
+
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
     <script src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         $(document).ready(function() {
             $('#search-form').on('submit', function(e) {
@@ -110,16 +119,102 @@
                         progressBar.text('0%');
                     }
 
-                    // Fetch progress every 1 seconds
+                    // Fetch progress every 1 second
                     setTimeout(fetchProgress, 1000);
                 }).fail(function() {
-                    // Retry after 1 seconds if there's an error
+                    // Retry after 1 second if there's an error
                     setTimeout(fetchProgress, 1000);
                 });
             }
 
             // Start fetching progress when the page loads
             fetchProgress();
+
+            // Setup Chart.js
+            const ctx = document.getElementById('trainingChart').getContext('2d');
+            const trainingChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Training Loss',
+                        data: [],
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'loss'
+                    }, {
+                        label: 'Validation Loss',
+                        data: [],
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'loss'
+                    }, {
+                        label: 'Training Accuracy',
+                        data: [],
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'accuracy'
+                    }, {
+                        label: 'Validation Accuracy',
+                        data: [],
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'accuracy'
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Epoch'
+                            }
+                        },
+                        loss: {
+                            type: 'linear',
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Loss'
+                            }
+                        },
+                        accuracy: {
+                            type: 'linear',
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Accuracy'
+                            }
+                        }
+                    }
+                }
+            });
+
+            async function fetchLatestMetrics() {
+                const response = await fetch('/latest_metrics');
+                const data = await response.json();
+
+                const epochs = data.epochs.map(epoch => `${epoch.epoch} (${epoch.phase})`);
+                const trainingLoss = data.epochs.map(epoch => epoch.loss);
+                const validationLoss = data.epochs.map(epoch => epoch.val_loss);
+                const trainingAccuracy = data.epochs.map(epoch => epoch.accuracy);
+                const validationAccuracy = data.epochs.map(epoch => epoch.val_accuracy);
+
+                trainingChart.data.labels = epochs;
+                trainingChart.data.datasets[0].data = trainingLoss;
+                trainingChart.data.datasets[1].data = validationLoss;
+                trainingChart.data.datasets[2].data = trainingAccuracy;
+                trainingChart.data.datasets[3].data = validationAccuracy;
+                trainingChart.update();
+            }
+
+            const ws = new WebSocket(`ws://${window.location.host}/ws`);
+            ws.onmessage = function() {
+                fetchLatestMetrics();
+            };
+
+            // Initial fetch to populate the chart
+            fetchLatestMetrics();
         });
     </script>
 </body>
