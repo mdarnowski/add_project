@@ -60,7 +60,7 @@ tf.keras.mixed_precision.set_global_policy("mixed_float16")
 
 # Environment Variables
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
-MODEL_PATH = os.getenv("MODEL_PATH", "model.h5")
+MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
 
 
 class Trainer:
@@ -379,7 +379,7 @@ class Trainer:
         try:
             model.fit(
                 train_dataset,
-                epochs=2,
+                epochs=20,
                 validation_data=val_dataset,
                 steps_per_epoch=steps_per_epoch_train,
                 validation_steps=steps_per_epoch_val,
