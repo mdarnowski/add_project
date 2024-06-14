@@ -1,18 +1,69 @@
+"""
+Web Application Module
+================================
+
+This module provides a web application for managing and processing images using FastAPI.
+It integrates with RabbitMQ for messaging and MongoDB/GridFS for image storage.
+
+Modules
+-------
+
+- `base64`
+- `json`
+- `logging`
+- `threading`
+- `time`
+- `gridfs`
+- `pika`
+- `uvicorn`
+- `fastapi`
+- `fastapi.middleware.cors`
+- `fastapi.responses`
+- `fastapi.templating`
+- `pika.exceptions`
+- `pymongo`
+
+Attributes
+----------
+
+- `MONGO_URI`: MongoDB connection URI.
+- `client`: MongoDB client.
+- `db`: MongoDB database.
+- `images_collection`: MongoDB collection for images.
+- `fs`: GridFS object for storing images.
+- `app`: FastAPI application instance.
+- `templates`: Jinja2Templates object for HTML rendering.
+- `progress`: Global dictionary to store processing progress.
+
+Functions
+---------
+
+- `connect_to_rabbitmq()`: Connect to RabbitMQ server with retry on failure.
+- `get_image(image_id)`: Retrieve image from GridFS and encode it in base64.
+- `consume_progress_updates()`: Consume progress updates from RabbitMQ.
+- `index(request: Request)`: Serve the main index page.
+- `search(request: Request, image_type: str, species: str, set_type: str)`: Serve the search results page.
+- `get_progress()`: Return current processing progress.
+- `trigger_processing()`: Trigger image processing via RabbitMQ.
+"""
+
 import base64
 import json
 import logging
 import threading
 import time
+import asyncio
 
 import gridfs
 import pika
 import uvicorn
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pika.exceptions import AMQPConnectionError
 from pymongo import MongoClient
+from typing import List
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +74,7 @@ MONGO_URI = "mongodb://mongodb:27017/"
 client = MongoClient(MONGO_URI)
 db = client.bird_dataset
 images_collection = db.images
+metrics_collection = db.metrics
 fs = gridfs.GridFS(db)
 
 app = FastAPI()
@@ -41,12 +93,37 @@ app.add_middleware(
 progress = {"processed": 0, "total": 0}
 
 
+# WebSocket manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+
+manager = ConnectionManager()
+
+
 def connect_to_rabbitmq() -> pika.BlockingConnection:
     """
     Connect to RabbitMQ server with retry on failure.
 
-    Returns:
-        pika.BlockingConnection: RabbitMQ connection object.
+    Returns
+    -------
+    pika.BlockingConnection
+        RabbitMQ connection object.
     """
     while True:
         try:
@@ -59,36 +136,64 @@ def connect_to_rabbitmq() -> pika.BlockingConnection:
 
 
 def get_image(image_id):
+    """
+    Retrieve image from GridFS and encode it in base64.
+
+    Parameters
+    ----------
+    image_id : ObjectId
+        The GridFS ObjectId of the image.
+
+    Returns
+    -------
+    str
+        Base64 encoded image data.
+    """
     if not image_id:
         return None
     image_data = fs.get(image_id).read()
     return base64.b64encode(image_data).decode("utf-8")
 
 
-def consume_progress_updates():
-    global progress
+def consume_updates():
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="progress_queue")
+    channel.queue_declare(queue="training_updates")
 
     def callback(ch, method, properties, body):
-        progress_update = json.loads(body)
-        progress["processed"] = progress_update["processed"]
-        progress["total"] = progress_update["total"]
+        update = json.loads(body)
+        asyncio.run(manager.broadcast(json.dumps(update)))
 
     channel.basic_consume(
         queue="progress_queue", on_message_callback=callback, auto_ack=True
     )
-    logger.info("Started consuming progress updates...")
+    channel.basic_consume(
+        queue="training_updates", on_message_callback=callback, auto_ack=True
+    )
+    logger.info("Started consuming updates...")
     channel.start_consuming()
 
 
 # Start the consumer in a separate thread
-threading.Thread(target=consume_progress_updates, daemon=True).start()
+threading.Thread(target=consume_updates, daemon=True).start()
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    """
+    Serve the main index page.
+
+    Parameters
+    ----------
+    request : Request
+        FastAPI request object.
+
+    Returns
+    -------
+    HTMLResponse
+        Rendered HTML page with species list.
+    """
     species_list = images_collection.distinct("species")
     return templates.TemplateResponse(
         "index.html", {"request": request, "species_list": species_list}
@@ -102,6 +207,25 @@ async def search(
     species: str = Query(None),
     set_type: str = Query(None),
 ):
+    """
+    Serve the search results page based on the query parameters.
+
+    Parameters
+    ----------
+    request : Request
+        FastAPI request object.
+    image_type : str, optional
+        Type of the image (e.g., "jpg", "png").
+    species : str, optional
+        Species of the bird.
+    set_type : str, optional
+        Set type (e.g., "train", "val").
+
+    Returns
+    -------
+    HTMLResponse
+        Rendered HTML page with search results.
+    """
     query = {}
     if image_type:
         query["image_type"] = image_type
@@ -133,17 +257,53 @@ async def search(
 
 @app.get("/progress")
 def get_progress():
+    """
+    Return current processing progress.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the processed and total counts.
+    """
     return progress
+
+
+@app.get("/latest_metrics")
+def get_latest_metrics():
+    latest_training = metrics_collection.find_one(sort=[("timestamp", -1)])
+    if latest_training:
+        return {"epochs": latest_training["epochs"]}
+    else:
+        return {"epochs": []}
 
 
 @app.post("/trigger_processing")
 def trigger_processing():
+    """
+    Trigger image processing via RabbitMQ.
+
+    Returns
+    -------
+    dict
+        Confirmation message for triggering image processing.
+    """
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="trigger_queue")
     channel.basic_publish(exchange="", routing_key="trigger_queue", body="")
     connection.close()
     return {"message": "Image processing triggered"}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.send_personal_message(f"You wrote: {data}", websocket)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 
 if __name__ == "__main__":

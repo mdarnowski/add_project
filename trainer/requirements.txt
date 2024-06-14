@@ -1,2 +1,4 @@
-pillow
+pymongo
+Pillow
 loguru
+pika

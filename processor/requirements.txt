@@ -1,2 +1,4 @@
 torchvision
 loguru
+tensorflow
+pillow
