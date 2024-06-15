@@ -17,13 +17,11 @@ from datetime import datetime
 import pika
 
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
-rabbitmq_queue_uploader = "training_metrics_queue"
-rabbitmq_queue_presenter = "training_updates"
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
 
 
-class RabbitMQLogger(Callback):
+class RabbitMQLoggerCallback(Callback):
     def __init__(self):
         super().__init__()
         self.training_id = str(datetime.now())
@@ -31,6 +29,8 @@ class RabbitMQLogger(Callback):
         self.connection = None
         self.channel_uploader = None
         self.channel_presenter = None
+        self.queue_uploader = "training_metrics_queue"  # Instance variable for queue name
+        self.queue_presenter = "training_updates"       # Instance variable for queue name
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
@@ -40,9 +40,9 @@ class RabbitMQLogger(Callback):
             pika.ConnectionParameters(host=RABBITMQ_HOST)
         )
         self.channel_uploader = self.connection.channel()
-        self.channel_uploader.queue_declare(queue=rabbitmq_queue_uploader)
+        self.channel_uploader.queue_declare(queue=self.queue_uploader)
         self.channel_presenter = self.connection.channel()
-        self.channel_presenter.queue_declare(queue=rabbitmq_queue_presenter)
+        self.channel_presenter.queue_declare(queue=self.queue_presenter)
 
     def close_connection(self):
         if self.connection and self.connection.is_open:
@@ -64,7 +64,7 @@ class RabbitMQLogger(Callback):
         self.connect_to_rabbitmq()
         self.channel_uploader.basic_publish(
             exchange="",
-            routing_key=rabbitmq_queue_uploader,
+            routing_key=self.queue_uploader,
             body=json.dumps(epoch_metrics),
         )
         message = {
@@ -74,7 +74,7 @@ class RabbitMQLogger(Callback):
         }
 
         self.channel_presenter.basic_publish(
-            exchange="", routing_key=rabbitmq_queue_presenter, body=json.dumps(message)
+            exchange="", routing_key=self.queue_presenter, body=json.dumps(message)
         )
 
 
@@ -254,7 +254,7 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        mongo_logger = RabbitMQLogger()
+        mongo_logger = RabbitMQLoggerCallback()
 
         print("Training with frozen base model...")
         mongo_logger.phase = "frozen"
