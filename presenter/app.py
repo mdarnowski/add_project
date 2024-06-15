@@ -156,6 +156,7 @@ def get_image(image_id):
 
 
 def consume_updates():
+    global progress
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="progress_queue")
@@ -165,8 +166,13 @@ def consume_updates():
         update = json.loads(body)
         asyncio.run(manager.broadcast(json.dumps(update)))
 
+    def callback_progress_bar(ch, method, properties, body):
+        progress_update = json.loads(body)
+        progress["processed"] = progress_update["processed"]
+        progress["total"] = progress_update["total"]
+
     channel.basic_consume(
-        queue="progress_queue", on_message_callback=callback, auto_ack=True
+        queue="progress_queue", on_message_callback=callback_progress_bar, auto_ack=True
     )
     channel.basic_consume(
         queue="training_updates", on_message_callback=callback, auto_ack=True

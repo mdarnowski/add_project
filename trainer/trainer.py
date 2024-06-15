@@ -29,8 +29,8 @@ class RabbitMQLoggerCallback(Callback):
         self.connection = None
         self.channel_uploader = None
         self.channel_presenter = None
-        self.queue_uploader = "training_metrics_queue"  # Instance variable for queue name
-        self.queue_presenter = "training_updates"       # Instance variable for queue name
+        self.queue_uploader = "training_metrics_queue"
+        self.queue_presenter = "training_updates"
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
