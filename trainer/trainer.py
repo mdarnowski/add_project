@@ -1,44 +1,8 @@
-"""
-Trainer Module
-==============
-
-This module provides functions for training a deep learning model using TensorFlow and Keras.
-It handles data retrieval via RabbitMQ, preparation of datasets in TFRecord format, model creation,
-training, and evaluation.
-
-Functions
----------
-- `create_model(num_classes: int) -> tf.keras.models.Model`
-    Creates and compiles a Keras model using InceptionV3 as the base model.
-- `parse_tfrecord(tfrecord)`
-    Parses a single TFRecord example into an image tensor and label.
-- `load_tfrecord_dataset(tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int)`
-    Loads a TFRecord dataset and prepares it for training.
-- `download_data_and_save_to_tfrecord(split: str, tfrecord_path: str)`
-    Downloads data from MongoDB and saves it to a TFRecord file.
-- `train_and_evaluate_model() -> None`
-    Trains and evaluates the model using the downloaded datasets.
-
-Environment Variables
----------------------
-- `MONGO_URI` : str
-    MongoDB connection URI, defaulting to "mongodb://mongodb:27017/".
-- `model_path` : str
-    The path where the trained model will be saved, defaulting to "model.h5".
-
-Dependencies
-------------
-- tensorflow
-- pymongo
-"""
-
 import os
 import json
 import base64
 import time
-
 import tensorflow as tf
-from pymongo import MongoClient
 from tensorflow.keras.applications.inception_v3 import InceptionV3
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, Callback
 from tensorflow.keras.layers import (
@@ -49,50 +13,36 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from loguru import logger
-import gridfs
 from datetime import datetime
 import pika
-import json
 
-
-# Enable mixed precision
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
-
-# RabbitMQ setup
-rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
-rabbitmq_queue = "training_updates"
-# MongoDB setup
-MONGO_URI = "mongodb://mongodb:27017/"
-client = MongoClient(MONGO_URI)
-db = client.bird_dataset
-collection = db.images
-fs = gridfs.GridFS(db)
-metrics_collection = db.metrics
-model_path = "model.keras"
-# Environment Variables
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+rabbitmq_queue_uploader = "training_metrics_queue"
+rabbitmq_queue_presenter = "training_updates"
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
 
 
-class MongoDBLogger(Callback):
+class RabbitMQLogger(Callback):
     def __init__(self):
         super().__init__()
-        self.training_id = metrics_collection.insert_one(
-            {"timestamp": datetime.now(), "epochs": []}
-        ).inserted_id
+        self.training_id = str(datetime.now())
         self.phase = None
         self.connection = None
-        self.channel = None
+        self.channel_uploader = None
+        self.channel_presenter = None
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
         if self.connection and self.connection.is_open:
             return
         self.connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=rabbitmq_host)
+            pika.ConnectionParameters(host=RABBITMQ_HOST)
         )
-        self.channel = self.connection.channel()
-        self.channel.queue_declare(queue=rabbitmq_queue)
+        self.channel_uploader = self.connection.channel()
+        self.channel_uploader.queue_declare(queue=rabbitmq_queue_uploader)
+        self.channel_presenter = self.connection.channel()
+        self.channel_presenter.queue_declare(queue=rabbitmq_queue_presenter)
 
     def close_connection(self):
         if self.connection and self.connection.is_open:
@@ -100,6 +50,7 @@ class MongoDBLogger(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         epoch_metrics = {
+            "training_id": self.training_id,
             "epoch": epoch,
             "phase": self.phase,
             "loss": logs.get("loss"),
@@ -107,65 +58,28 @@ class MongoDBLogger(Callback):
             "val_loss": logs.get("val_loss"),
             "val_accuracy": logs.get("val_accuracy"),
         }
-        metrics_collection.update_one(
-            {"_id": self.training_id}, {"$push": {"epochs": epoch_metrics}}
-        )
+        print("Epoch metrics: sending", epoch_metrics)
 
-        # Send simple message to RabbitMQ
+        # Send metrics to RabbitMQ
+        self.connect_to_rabbitmq()
+        self.channel_uploader.basic_publish(
+            exchange="",
+            routing_key=rabbitmq_queue_uploader,
+            body=json.dumps(epoch_metrics),
+        )
         message = {
             "training_id": str(self.training_id),
             "epoch": epoch,
             "phase": self.phase,
         }
 
-        self.connect_to_rabbitmq()
-        self.channel.basic_publish(
-            exchange="", routing_key=rabbitmq_queue, body=json.dumps(message)
+        self.channel_presenter.basic_publish(
+            exchange="", routing_key=rabbitmq_queue_presenter, body=json.dumps(message)
         )
 
 
 class Trainer:
-    """
-    Trainer Class
-    =============
-
-    This class provides functionality to request image data from RabbitMQ,
-    receive and process image data, save to TFRecord, prepare datasets,
-    and train and evaluate a deep learning model.
-
-    Methods
-    -------
-    __init__()
-        Initializes the Trainer instance and sets up RabbitMQ connection.
-    connect_to_rabbitmq()
-        Establishes a connection to RabbitMQ and declares the required queues.
-    consume_message(ch, method, properties, body)
-        Callback function for consuming image data messages.
-    receive_num_classes(ch, method, properties, body)
-        Callback function for receiving num_classes.
-    send_request(split: str)
-        Sends a request message to RabbitMQ for the specified dataset split.
-    save_to_tfrecord(split: str, tfrecord_path: str, image_data: bytes, label: int)
-        Saves received images incrementally to a TFRecord file.
-    start_consuming()
-        Starts consuming messages from RabbitMQ.
-    train_and_evaluate_model()
-        Trains and evaluates the model using the received datasets.
-    check_all_done()
-        Checks if all splits have received 'done' signals and starts training.
-    """
-
     def __init__(self) -> None:
-        """
-        Initializes the Trainer instance.
-
-        Sets up RabbitMQ connection and declares queues.
-
-        Environment Variables
-        ---------------------
-        - RABBITMQ_HOST : str, optional
-            The RabbitMQ host address (default: "localhost")
-        """
         self.rabbitmq_host = RABBITMQ_HOST
         self.connection = None
         self.channel = None
@@ -179,11 +93,6 @@ class Trainer:
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self) -> None:
-        """
-        Establishes a connection to RabbitMQ and declares the required queues.
-
-        Retries the connection every 5 seconds if RabbitMQ is not available.
-        """
         while True:
             try:
                 self.connection = pika.BlockingConnection(
@@ -192,9 +101,7 @@ class Trainer:
                 self.channel = self.connection.channel()
                 self.channel.queue_declare(queue="image_queue_downloader")
                 self.channel.queue_declare(queue="data_request_queue")
-                self.channel.queue_declare(
-                    queue="num_classes_queue"
-                )  # Added for num_classes
+                self.channel.queue_declare(queue="num_classes_queue")
                 logger.info("Connected to RabbitMQ.")
                 # Start consuming num_classes before requesting data
                 self.channel.basic_consume(
@@ -208,20 +115,6 @@ class Trainer:
                 time.sleep(5)
 
     def consume_message(self, ch, method, properties, body) -> None:
-        """
-        Callback function for consuming image data messages.
-
-        Parameters
-        ----------
-        ch : channel
-            The channel object.
-        method : method
-            The method object.
-        properties : properties
-            The properties object.
-        body : bytes
-            The message body.
-        """
         try:
             message = json.loads(body)
             self._process_message(message)
@@ -229,20 +122,6 @@ class Trainer:
             logger.error(f"Error processing message: {e}")
 
     def receive_num_classes(self, ch, method, properties, body) -> None:
-        """
-        Callback function for receiving num_classes.
-
-        Parameters
-        ----------
-        ch : channel
-            The channel object.
-        method : method
-            The method object.
-        properties : properties
-            The properties object.
-        body : bytes
-            The message body.
-        """
         try:
             message = json.loads(body)
             self.num_classes = message["num_classes"]
@@ -251,14 +130,6 @@ class Trainer:
             logger.error(f"Error receiving num_classes: {e}")
 
     def send_request(self, split: str) -> None:
-        """
-        Sends a request message to RabbitMQ for the specified dataset split.
-
-        Parameters
-        ----------
-        split : str
-            The dataset split to request (e.g., 'train', 'val', 'test').
-        """
         try:
             self.channel.basic_publish(
                 exchange="",
@@ -270,14 +141,6 @@ class Trainer:
             logger.error(f"Error sending request: {e}")
 
     def _process_message(self, message: dict) -> None:
-        """
-        Processes the message and saves the image data to TFRecord.
-
-        Parameters
-        ----------
-        message : dict
-            The message containing encoded image data and metadata.
-        """
         split = message.get("split")
         if split is None:
             logger.error("Message missing 'split' key.")
@@ -296,22 +159,8 @@ class Trainer:
         self.save_to_tfrecord(split, f"{split}.tfrecord", image_data, label)
 
     def save_to_tfrecord(
-            self, split: str, tfrecord_path: str, image_data: bytes, label: int
+        self, split: str, tfrecord_path: str, image_data: bytes, label: int
     ) -> None:
-        """
-        Saves received images incrementally to a TFRecord file.
-
-        Parameters
-        ----------
-        split : str
-            The dataset split (e.g., 'train', 'val', 'test').
-        tfrecord_path : str
-            The path where the TFRecord file will be saved.
-        image_data : bytes
-            The image data in bytes.
-        label : int
-            The label of the image.
-        """
         feature = {
             "image": tf.train.Feature(
                 bytes_list=tf.train.BytesList(value=[image_data])
@@ -323,19 +172,11 @@ class Trainer:
         self.tfrecord_writers[split].write(example.SerializeToString())
 
     def check_all_done(self) -> None:
-        """
-        Checks if all splits have received 'done' signals and starts training.
-        """
         if all(self.done_signals.values()) and self.num_classes is not None:
             logger.info("All splits received 'done' signal. Starting training...")
             self.train_and_evaluate_model()
 
     def start_consuming(self) -> None:
-        """
-        Starts consuming messages from RabbitMQ.
-
-        Consumes messages from the 'image_queue_downloader' queue and processes them.
-        """
         while True:
             try:
                 self.channel.basic_consume(
@@ -346,26 +187,13 @@ class Trainer:
                 logger.info("Trainer is listening for messages...")
                 self.channel.start_consuming()
             except (
-                    pika.exceptions.ConnectionClosed,
-                    pika.exceptions.AMQPConnectionError,
+                pika.exceptions.ConnectionClosed,
+                pika.exceptions.AMQPConnectionError,
             ):
                 logger.warning("Connection lost, reconnecting...")
                 self.connect_to_rabbitmq()
 
     def create_model(self) -> Model:
-        """
-        Create and compile a Keras model using InceptionV3 as the base model.
-
-        :return: The compiled Keras model.
-        :rtype: tensorflow.keras.models.Model
-
-        The model consists of:
-        - InceptionV3 base model without the top layer, with weights frozen
-        - Global Average Pooling layer
-        - Batch Normalization layer
-        - Dropout layer with 50% dropout rate
-        - Dense output layer with softmax activation and L2 regularization
-        """
         base_model = InceptionV3(include_top=False, input_shape=(299, 299, 3))
         base_model.trainable = False
 
@@ -390,15 +218,6 @@ class Trainer:
         return model
 
     def train_and_evaluate_model(self) -> None:
-        """
-        Train and evaluate the model using the received datasets.
-
-        This function:
-        - Loads the training, validation, and test datasets from TFRecord files
-        - Creates and trains the model with frozen and then fine-tuned InceptionV3 base
-        - Evaluates the model on the test dataset
-        - Saves the trained model to a file
-        """
         batch_size = 16
         shuffle_buffer_size = 2048
         train_tfrecord_path = "train.tfrecord"
@@ -435,14 +254,14 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        mongo_logger = MongoDBLogger()
+        mongo_logger = RabbitMQLogger()
 
         print("Training with frozen base model...")
         mongo_logger.phase = "frozen"
         try:
             model.fit(
                 train_dataset,
-                epochs=2,
+                epochs=3,
                 validation_data=val_dataset,
                 steps_per_epoch=steps_per_epoch_train,
                 validation_steps=steps_per_epoch_val,
@@ -466,7 +285,7 @@ class Trainer:
         mongo_logger.phase = "unfrozen"
         model.fit(
             train_dataset,
-            epochs=20,
+            epochs=3,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
@@ -491,18 +310,6 @@ class Trainer:
 
 
 def parse_tfrecord(tfrecord):
-    """
-    Parse a single TFRecord example.
-
-    :param tfrecord: The TFRecord example to parse.
-    :type tfrecord: tf.train.Example
-    :return: A tuple containing the image tensor and the label.
-    :rtype: tuple (tensorflow.Tensor, int)
-
-    The function expects TFRecord examples to contain:
-    - image: A JPEG-encoded image
-    - label: An integer label
-    """
     feature_description = {
         "image": tf.io.FixedLenFeature([], tf.string),
         "label": tf.io.FixedLenFeature([], tf.int64),
@@ -516,28 +323,8 @@ def parse_tfrecord(tfrecord):
 
 
 def load_tfrecord_dataset(
-        tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
+    tfrecord_path: str, batch_size: int, shuffle_buffer_size: int, num_classes: int
 ):
-    """
-    Load a TFRecord dataset and prepare it for training.
-
-    :param tfrecord_path: The path to the TFRecord file.
-    :type tfrecord_path: str
-    :param batch_size: The batch size for training.
-    :type batch_size: int
-    :param shuffle_buffer_size: The buffer size for shuffling the dataset.
-    :type shuffle_buffer_size: int
-    :param num_classes: The number of output classes.
-    :type num_classes: int
-    :return: A prepared tf.data.Dataset object.
-    :rtype: tensorflow.data.Dataset
-
-    The dataset is:
-    - Parsed using `parse_tfrecord`
-    - One-hot encoded for the labels
-    - Shuffled and batched
-    - Prefetched for performance
-    """
     dataset = tf.data.TFRecordDataset(tfrecord_path)
     dataset = dataset.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
     dataset = dataset.map(lambda x, y: (x, tf.one_hot(y, num_classes)))
