@@ -10,7 +10,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="rainbow-text" style="font-size: 70px">Bird Dataset</h1>
+        <h1 class="rainbow-text" style="font-size: 70px; position: relative; z-index: 20">Bird Dataset</h1>
         <div class="button-container w-100">
             <button id="triggerButton"><i class="fas fa-dove"></i> Go! go! Produce!</button>
             <button id="startTrainingButton"><i class="fas fa-play"></i> Start Training</button>
@@ -105,7 +105,14 @@
         <div class="bird-container bird-container-thirty">
             <div class="bird bird-thirty"></div>
         </div>
-
+        <div id="clouds">
+            <div class="cloud x1"></div>
+            <!-- Time for multiple clouds to dance around -->
+            <div class="cloud x2"></div>
+            <div class="cloud x3"></div>
+            <div class="cloud x4"></div>
+            <div class="cloud x5"></div>
+        </div>
         <div class="w-100">
             <div class="progress">
                 <div class="progress-bar progress-bar-striped bg-success" id="progress-bar-producer" role="progressbar" style="width: 0%">0%</div>
