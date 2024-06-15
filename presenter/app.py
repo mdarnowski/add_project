@@ -90,7 +90,7 @@ app.add_middleware(
 )
 
 # Global variable to store the progress
-progress = {"processed": 0, "total": 0}
+progress_producer = {"produced": 0, "total": 0}
 
 
 # WebSocket manager
@@ -156,7 +156,7 @@ def get_image(image_id):
 
 
 def consume_updates():
-    global progress
+    global progress_producer
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue="progress_queue")
@@ -168,8 +168,8 @@ def consume_updates():
 
     def callback_progress_bar(ch, method, properties, body):
         progress_update = json.loads(body)
-        progress["processed"] = progress_update["processed"]
-        progress["total"] = progress_update["total"]
+        progress_producer["produced"] = progress_update["produced"]
+        progress_producer["total"] = progress_update["total"]
 
     channel.basic_consume(
         queue="progress_queue", on_message_callback=callback_progress_bar, auto_ack=True
@@ -271,7 +271,7 @@ def get_progress():
     dict
         Dictionary containing the processed and total counts.
     """
-    return progress
+    return progress_producer
 
 
 @app.get("/latest_metrics")
@@ -294,10 +294,10 @@ def start_training():
         Confirmation message for starting training.
     """
     images_in_db_count = images_collection.count_documents({"image_type": "processed"})
-    if progress["processed"] == 0:
+    if progress_producer["produced"] == 0:
         return {
             "message": "Producer has not started producing images, please start producing first."}
-    elif images_in_db_count >= progress["total"]:
+    elif images_in_db_count >= progress_producer["total"]:
         connection = connect_to_rabbitmq()
         channel = connection.channel()
         channel.queue_declare(queue="training_queue")
@@ -306,7 +306,7 @@ def start_training():
         return {"message": "All images processed, starting training..."}
     else:
         return {
-            "message": f"Not all images processed, cannot start training (images: {images_in_db_count} / {progress['total']})"}
+            "message": f"Not all images processed, cannot start training (images: {images_in_db_count} / {progress_producer['total']})"}
 
 
 @app.post("/trigger_processing")

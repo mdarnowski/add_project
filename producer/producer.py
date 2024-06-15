@@ -309,7 +309,7 @@ class ImageProducer:
                 exchange="",
                 routing_key=self.progress_queue,
                 body=json.dumps(
-                    {"processed": self.processed_images, "total": self.total_images}
+                    {"produced": self.processed_images, "total": self.total_images}
                 ),
             )
             self.last_progress_report = progress_percentage

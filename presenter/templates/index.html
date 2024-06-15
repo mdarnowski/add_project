@@ -131,7 +131,7 @@
                 $.get('/progress', function(data) {
                     const progressBar = $('#progress-bar');
                     if (data.total > 0) {
-                        const percentage = (data.processed / data.total) * 100;
+                        const percentage = (data.produced / data.total) * 100;
                         progressBar.css('width', percentage + '%');
                         progressBar.text(Math.floor(percentage) + '%');
                     } else {
