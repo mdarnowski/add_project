@@ -19,6 +19,8 @@ import pika
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
+QUEUE_UPLOADER = os.getenv("TRAINING_METRICS_QUEUE", "training_metrics_queue")
+QUEUE_PRESENTER = os.getenv("TRAINING_UPDATES", "training_updates")
 
 
 class RabbitMQLoggerCallback(Callback):
@@ -29,8 +31,6 @@ class RabbitMQLoggerCallback(Callback):
         self.connection = None
         self.channel_uploader = None
         self.channel_presenter = None
-        self.queue_uploader = "training_metrics_queue"
-        self.queue_presenter = "training_updates"
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
@@ -40,9 +40,9 @@ class RabbitMQLoggerCallback(Callback):
             pika.ConnectionParameters(host=RABBITMQ_HOST)
         )
         self.channel_uploader = self.connection.channel()
-        self.channel_uploader.queue_declare(queue=self.queue_uploader)
+        self.channel_uploader.queue_declare(queue=QUEUE_UPLOADER)
         self.channel_presenter = self.connection.channel()
-        self.channel_presenter.queue_declare(queue=self.queue_presenter)
+        self.channel_presenter.queue_declare(queue=QUEUE_PRESENTER)
 
     def close_connection(self):
         if self.connection and self.connection.is_open:
@@ -60,13 +60,13 @@ class RabbitMQLoggerCallback(Callback):
         }
         print("Epoch metrics: sending", epoch_metrics)
 
-        # Send metrics to RabbitMQ
         self.connect_to_rabbitmq()
         self.channel_uploader.basic_publish(
             exchange="",
-            routing_key=self.queue_uploader,
+            routing_key=QUEUE_UPLOADER,
             body=json.dumps(epoch_metrics),
         )
+
         message = {
             "training_id": str(self.training_id),
             "epoch": epoch,
@@ -74,7 +74,7 @@ class RabbitMQLoggerCallback(Callback):
         }
 
         self.channel_presenter.basic_publish(
-            exchange="", routing_key=self.queue_presenter, body=json.dumps(message)
+            exchange="", routing_key=QUEUE_PRESENTER, body=json.dumps(message)
         )
 
 
@@ -350,7 +350,6 @@ def load_tfrecord_dataset(
 
 
 if __name__ == "__main__":
-    # Configure TensorFlow for optimal GPU usage
     gpus = tf.config.experimental.list_physical_devices("GPU")
     if gpus:
         try:
@@ -360,5 +359,4 @@ if __name__ == "__main__":
             logger.error(e)
 
     trainer = Trainer()
-    # Start consuming messages
     trainer.start_consuming()

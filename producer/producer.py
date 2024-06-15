@@ -1,36 +1,3 @@
-"""
-Producer Module
-==============
-Module for image processing and message queueing using RabbitMQ.
-
-This module contains the `ImageProducer` class, which is responsible for:
-- Connecting to RabbitMQ
-- Consuming messages from a trigger queue
-- Processing images from a dataset
-- Publishing image data to various queues
-
-It is designed to handle image data in a specified directory, encode it, and
-distribute it across different queues for further processing.
-
-Dependencies:
-    - base64
-    - json
-    - os
-    - random
-    - time
-    - threading
-    - pika
-    - loguru
-
-Environment Variables:
-    - DATASET_PATH: Path to the directory containing images.
-    - RAW_IMAGE_QUEUE: Name of the queue to publish raw image data.
-    - RAW_IMAGE_QUEUE_FOR_UPLOADER: Name of the uploader queue.
-    - PROGRESS_QUEUE: Name of the queue to publish progress information.
-    - TRIGGER_QUEUE: Name of the queue to listen for trigger messages.
-    - RABBITMQ_HOST: Hostname of the RabbitMQ server.
-"""
-
 import base64
 import json
 import os
@@ -100,6 +67,8 @@ class ImageProducer:
         Encodes and publishes images from a subdirectory.
     publish_to_queues(data: dict, split: str) -> None
         Publishes image data to the appropriate queues.
+    send_reset_message() -> None
+        Sends a reset message to the processor.
     start() -> None
         Starts the image producer to listen for trigger messages.
     """
@@ -220,6 +189,7 @@ class ImageProducer:
                 images_to_process = [file for file in files if file.endswith(".jpg")]
                 if images_to_process:
                     self.publish_images(subdir, images_to_process)
+            self.send_reset_message()
         finally:
             with self.lock:
                 self.processing = False
@@ -321,6 +291,18 @@ class ImageProducer:
         self.channel.basic_publish(
             exchange="", routing_key=self.queue_name_uploader, body=json.dumps(data)
         )
+
+    def send_reset_message(self) -> None:
+        """
+        Sends a reset message to the processor.
+        """
+        reset_message = {"reset": True, "message": "Reset counter for processor"}
+        self.channel.basic_publish(
+            exchange="",
+            routing_key=self.queue_name,
+            body=json.dumps(reset_message),
+        )
+        logger.info("Reset message sent to processor")
 
     def start(self) -> None:
         """

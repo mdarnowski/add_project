@@ -101,7 +101,6 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - mongodb
     volumes:
       - ./trainer:/app
     networks:
