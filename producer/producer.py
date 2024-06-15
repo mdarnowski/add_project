@@ -116,7 +116,7 @@ class ImageProducer:
         self.queue_name_uploader = os.getenv(
             "RAW_IMAGE_QUEUE_FOR_UPLOADER", "raw_image_queue_uploader"
         )
-        self.progress_queue = os.getenv("PROGRESS_QUEUE", "progress_queue")
+        self.progress_queue = os.getenv("PROGRESS_QUEUE", "producer_progress_queue")
         self.trigger_queue = os.getenv("TRIGGER_QUEUE", "trigger_queue")
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
 

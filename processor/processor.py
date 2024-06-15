@@ -57,10 +57,16 @@ class RabbitMQProcessor:
         Queue name for raw images.
     processed_image_queue : str
         Queue name for processed images.
+    processor_progress_queue : str
+        Queue name for processor progress updates.
     connection : pika.BlockingConnection
         Connection object for RabbitMQ.
     channel : pika.channel.Channel
         Channel object for RabbitMQ.
+    total_images : int
+        Total number of images to process.
+    processed_images : int
+        Count of processed images.
 
     Methods
     -------
@@ -70,6 +76,8 @@ class RabbitMQProcessor:
         Transforms the input image data according to the split type.
     send_to_queue(data: dict):
         Processes the image and sends the transformed image to the processed queue.
+    update_progress():
+        Sends progress update to the processor progress queue.
     start_consuming():
         Starts consuming messages from the raw image queue.
     """
@@ -78,21 +86,26 @@ class RabbitMQProcessor:
         """
         Initializes the RabbitMQProcessor class.
 
-        Sets up the RabbitMQ host, raw image queue, and processed image queue
-        from environment variables or defaults.
+        Sets up the RabbitMQ host, raw image queue, processed image queue,
+        and processor progress queue from environment variables or defaults.
         """
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
         self.raw_image_queue = os.getenv("RAW_IMAGE_QUEUE", "raw_image_queue")
         self.processed_image_queue = os.getenv(
             "PROCESSED_IMAGE_QUEUE", "processed_image_queue"
         )
+        self.processor_progress_queue = os.getenv(
+            "PROCESSOR_PROGRESS_QUEUE", "processor_progress_queue"
+        )
         self.connection = None
         self.channel = None
+        self.total_images = 0
+        self.processed_images = 0
         self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self):
         """
-        Connects to RabbitMQ server and declares the processed image queue.
+        Connects to RabbitMQ server and declares the processed image and processor progress queues.
 
         Retries connection every 5 seconds if initial connection fails.
         """
@@ -103,6 +116,7 @@ class RabbitMQProcessor:
                 )
                 self.channel = self.connection.channel()
                 self.channel.queue_declare(queue=self.processed_image_queue)
+                self.channel.queue_declare(queue=self.processor_progress_queue)
                 logger.info("Connected to RabbitMQ.")
             except AMQPConnectionError:
                 logger.warning("RabbitMQ not available, retrying in 5 seconds...")
@@ -133,7 +147,6 @@ class RabbitMQProcessor:
             img_array = tf.image.resize(img_array, [299, 299])
 
         img_array = tf.cast(img_array, tf.float32) / 255.0
-
         return img_array
 
     def send_to_queue(self, data: dict):
@@ -176,11 +189,30 @@ class RabbitMQProcessor:
             )
             logger.info(f"Sent processed message for image_path: {image_path} to queue")
 
+            # Update progress
+            self.processed_images += 1
+            self.update_progress()
+
         except Exception as e:
             logger.error(f"Error processing image. Error: {e}")
             if isinstance(e, AMQPConnectionError) or isinstance(e, ConnectionClosed):
                 logger.error("Connection lost, attempting to reconnect...")
                 self.connect_to_rabbitmq()
+
+    def update_progress(self):
+        """
+        Sends progress update to the processor progress queue.
+        """
+        progress_message = {
+            "processed": self.processed_images,
+            "total": self.total_images,
+        }
+        self.channel.basic_publish(
+            exchange="",
+            routing_key=self.processor_progress_queue,
+            body=json.dumps(progress_message),
+        )
+        logger.info(f"Sent progress update: {progress_message}")
 
     def start_consuming(self):
         """
@@ -201,11 +233,31 @@ class RabbitMQProcessor:
                 f"Processed and sent message for image_path: {message['image_path']}"
             )
 
+        self.total_images = self.get_queue_length(
+            self.raw_image_queue
+        )  # Set total images at start
         self.channel.basic_consume(
             queue=self.raw_image_queue, on_message_callback=callback, auto_ack=True
         )
         logger.info("Processor is listening for messages...")
         self.channel.start_consuming()
+
+    def get_queue_length(self, queue_name):
+        """
+        Retrieves the length of the queue.
+
+        Parameters
+        ----------
+        queue_name : str
+            Name of the queue.
+
+        Returns
+        -------
+        int
+            Number of messages in the queue.
+        """
+        queue_state = self.channel.queue_declare(queue=queue_name, passive=True)
+        return queue_state.method.message_count
 
 
 if __name__ == "__main__":

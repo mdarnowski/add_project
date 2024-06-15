@@ -20,22 +20,49 @@
             max-width: 100%;
             height: auto;
         }
-        #progress-container {
+        #progress-container-producer, #progress-container-processor {
             width: 100%;
             background-color: #f3f3f3;
             border: 1px solid #ccc;
             border-radius: 5px;
             margin-top: 20px;
         }
-        #progress-bar {
+        #progress-bar-producer, #progress-bar-processor  {
             width: 0%;
             height: 30px;
-            background-color: #4caf50;
             text-align: center;
             line-height: 30px;
             color: white;
             border-radius: 5px;
         }
+        #progress-container-raw-uploader, #progress-container-processed-uploader {
+            width: 100%;
+            background-color: #f3f3f3;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        #progress-bar-raw-uploader, #progress-bar-processed-uploader {
+            width: 0%;
+            height: 30px;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            border-radius: 5px;
+        }
+        #progress-bar-raw-uploader { background-color: #ff9800; }
+        #progress-bar-processed-uploader { background-color: #f003fc; }
+        #progress-bar-producer { background-color: #4caf50; }
+        #progress-bar-processor { background-color: #2196f3; }
+        #progress-container-producer strong,
+        #progress-container-processor strong,
+        #progress-container-raw-uploader strong,
+        #progress-container-processed-uploader strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+
         #training-chart-container {
             width: 100%;
             margin-top: 20px;
@@ -57,9 +84,25 @@
         <button id="triggerButton">Go! go! produce</button>
         <button id="startTrainingButton">Start Training</button>
     </div>
-    <div id="progress-container">
-        <div id="progress-bar">0%</div>
+
+    <div id="progress-container-producer">
+        <strong>Producer Progress:</strong>
+        <div id="progress-bar-producer">0%</div>
     </div>
+    <div id="progress-container-processor">
+        <strong>Processor Progress:</strong>
+        <div id="progress-bar-processor">0%</div>
+    </div>
+    <div id="progress-container-raw-uploader">
+        <strong>Raw Uploader Progress:</strong>
+        <div id="progress-bar-raw-uploader">0%</div>
+    </div>
+    <div id="progress-container-processed-uploader">
+        <strong>Processed Uploader Progress:</strong>
+        <div id="progress-bar-processed-uploader">0%</div>
+    </div>
+>
+
 
     <div id="training-chart-container">
         <canvas id="trainingChart" width="400" height="200"></canvas>
@@ -127,25 +170,48 @@
                             console.error('Error:', error);
                         });
                 });
-            function fetchProgress() {
-                $.get('/progress', function(data) {
-                    const progressBar = $('#progress-bar');
-                    if (data.total > 0) {
-                        const percentage = (data.produced / data.total) * 100;
-                        progressBar.css('width', percentage + '%');
-                        progressBar.text(Math.floor(percentage) + '%');
-                    } else {
-                        progressBar.css('width', '0%');
-                        progressBar.text('0%');
-                    }
+          function fetchProgress() {
+            $.get('/progress', function(data) {
+                const progressBarProducer = $('#progress-bar-producer');
+                const progressBarProcessor = $('#progress-bar-processor');
+                const progressBarRawUploader = $('#progress-bar-raw-uploader');
+                const progressBarProcessedUploader = $('#progress-bar-processed-uploader');
 
-                    // Fetch progress every 1 second
-                    setTimeout(fetchProgress, 1000);
-                }).fail(function() {
-                    // Retry after 1 second if there's an error
-                    setTimeout(fetchProgress, 1000);
-                });
-            }
+                if (data.total > 0) {
+                    const percentageProducer = (data.produced / data.total) * 100;
+                    const percentageProcessor = (data.processed / data.total) * 100;
+                    const percentageRawUploader = (data.uploaded_raw / data.total) * 100;
+                    const percentageProcessedUploader = (data.uploaded_processed / data.total) * 100;
+
+                    progressBarProducer.css('width', percentageProducer + '%');
+                    progressBarProducer.text(Math.floor(percentageProducer) + '%');
+                    progressBarProcessor.css('width', percentageProcessor + '%');
+                    progressBarProcessor.text(Math.floor(percentageProcessor) + '%');
+                    progressBarRawUploader.css('width', percentageRawUploader + '%');
+                    progressBarRawUploader.text(Math.floor(percentageRawUploader) + '%');
+                    progressBarProcessedUploader.css('width', percentageProcessedUploader + '%');
+                    progressBarProcessedUploader.text(Math.floor(percentageProcessedUploader) + '%');
+                } else {
+                    progressBarProducer.css('width', '0%');
+                    progressBarProducer.text('0%');
+                    progressBarProcessor.css('width', '0%');
+                    progressBarProcessor.text('0%');
+                    progressBarRawUploader.css('width', '0%');
+                    progressBarRawUploader.text('0%');
+                    progressBarProcessedUploader.css('width', '0%');
+                    progressBarProcessedUploader.text('0%');
+                }
+                // Fetch progress every 1 second
+                setTimeout(fetchProgress, 1000);
+            }).fail(function() {
+                // Retry after 1 second if there's an error
+                setTimeout(fetchProgress, 1000);
+            });
+}
+
+// Start fetching progress when the page loads
+fetchProgress();
+
 
             // Start fetching progress when the page loads
             fetchProgress();

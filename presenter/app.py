@@ -90,7 +90,13 @@ app.add_middleware(
 )
 
 # Global variable to store the progress
-progress_producer = {"produced": 0, "total": 0}
+progress_producer = {
+    "produced": 0,
+    "processed": 0,
+    "uploaded_raw": 0,
+    "uploaded_processed": 0,
+    "total": 0,
+}
 
 
 # WebSocket manager
@@ -159,20 +165,52 @@ def consume_updates():
     global progress_producer
     connection = connect_to_rabbitmq()
     channel = connection.channel()
-    channel.queue_declare(queue="progress_queue")
+    channel.queue_declare(queue="producer_progress_queue")
+    channel.queue_declare(queue="processor_progress_queue")
+    channel.queue_declare(queue="raw_uploader_progress_queue")
+    channel.queue_declare(queue="processed_uploader_progress_queue")
     channel.queue_declare(queue="training_updates")
 
     def callback(ch, method, properties, body):
         update = json.loads(body)
         asyncio.run(manager.broadcast(json.dumps(update)))
 
-    def callback_progress_bar(ch, method, properties, body):
+    def callback_producer(ch, method, properties, body):
         progress_update = json.loads(body)
         progress_producer["produced"] = progress_update["produced"]
         progress_producer["total"] = progress_update["total"]
 
+    def callback_processor(ch, method, properties, body):
+        progress_update = json.loads(body)
+        progress_producer["processed"] = progress_update["processed"]
+
+    def callback_raw_uploader(ch, method, properties, body):
+        progress_update = json.loads(body)
+        progress_producer["uploaded_raw"] = progress_update["uploaded"]
+
+    def callback_processed_uploader(ch, method, properties, body):
+        progress_update = json.loads(body)
+        progress_producer["uploaded_processed"] = progress_update["uploaded"]
+
     channel.basic_consume(
-        queue="progress_queue", on_message_callback=callback_progress_bar, auto_ack=True
+        queue="producer_progress_queue",
+        on_message_callback=callback_producer,
+        auto_ack=True,
+    )
+    channel.basic_consume(
+        queue="processor_progress_queue",
+        on_message_callback=callback_processor,
+        auto_ack=True,
+    )
+    channel.basic_consume(
+        queue="raw_uploader_progress_queue",
+        on_message_callback=callback_raw_uploader,
+        auto_ack=True,
+    )
+    channel.basic_consume(
+        queue="processed_uploader_progress_queue",
+        on_message_callback=callback_processed_uploader,
+        auto_ack=True,
     )
     channel.basic_consume(
         queue="training_updates", on_message_callback=callback, auto_ack=True
@@ -208,10 +246,10 @@ async def index(request: Request):
 
 @app.get("/search", response_class=HTMLResponse)
 async def search(
-        request: Request,
-        image_type: str = Query(None),
-        species: str = Query(None),
-        set_type: str = Query(None),
+    request: Request,
+    image_type: str = Query(None),
+    species: str = Query(None),
+    set_type: str = Query(None),
 ):
     """
     Serve the search results page based on the query parameters.
@@ -269,7 +307,7 @@ def get_progress():
     Returns
     -------
     dict
-        Dictionary containing the processed and total counts.
+        Dictionary containing the processed and total counts for all stages.
     """
     return progress_producer
 
@@ -296,7 +334,8 @@ def start_training():
     images_in_db_count = images_collection.count_documents({"image_type": "processed"})
     if progress_producer["produced"] == 0:
         return {
-            "message": "Producer has not started producing images, please start producing first."}
+            "message": "Producer has not started producing images, please start producing first."
+        }
     elif images_in_db_count >= progress_producer["total"]:
         connection = connect_to_rabbitmq()
         channel = connection.channel()
@@ -306,7 +345,8 @@ def start_training():
         return {"message": "All images processed, starting training..."}
     else:
         return {
-            "message": f"Not all images processed, cannot start training (images: {images_in_db_count} / {progress_producer['total']})"}
+            "message": f"Not all images processed, cannot start training (images: {images_in_db_count} / {progress_producer['total']})"
+        }
 
 
 @app.post("/trigger_processing")
