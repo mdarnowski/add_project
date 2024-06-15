@@ -1,0 +1,299 @@
+@font-face {
+    font-family: 'FlyingBird';
+    src: url('../fonts/FlyingBird-Yz9Ga.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+/* Apply the gradient rainbow effect */
+.rainbow-text {
+    font-family: 'FlyingBird', sans-serif;
+    font-weight: normal;
+    font-style: normal;
+    background: linear-gradient(90deg, red, indigo, violet);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+body {
+    font-family: 'FlyingBird', sans-serif;
+    background-image: linear-gradient(135deg, #5EFCE8 10%, #736EFE 100%);
+    margin: 20px;
+}
+
+.container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+}
+
+.card {
+    border: none;
+    margin: 10px;
+    z-index: 20;
+    width: 18rem;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    overflow: hidden;
+    background-color: #fff;
+}
+
+.card img {
+    width: 100%;
+    height: auto;
+}
+
+.card-body {
+    padding: 15px;
+}
+
+.card-title {
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+
+.card-text {
+    font-size: 1rem;
+    color: #666;
+}
+
+.progress {
+    position: relative;
+    z-index: 20;
+    margin-top: 20px;
+    height: 30px;
+}
+
+.progress-bar {
+    position: relative;
+    z-index: 20;
+    background-color: rgba(0, 0, 0, 0.1);
+    font-weight: bold;
+}
+
+.progress-bar-label {
+    position: relative;
+    z-index: 20;
+    margin-top: 5px;
+
+    text-align: center;
+    font-weight: bold;
+}
+
+#training-chart-container {
+    position: relative;
+    z-index: 20;
+    width: 100%;
+    margin-top: 40px;
+    padding: 20px;
+    background-color: #ffffffcc;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.button-container {
+    position: relative;
+    z-index: 20;
+    font-family: Arial, sans-serif;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.button-container button {
+    position: relative;
+    flex: 1;
+    margin: 0 5px;
+    z-index: 20;
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    color: #fff;
+}
+
+.button-container button:first-child {
+    background-color: #28a745;
+}
+
+.button-container button:last-child {
+    background-color: #17a2b8;
+}
+
+form {
+    position: relative;
+    z-index: 20;
+    margin-top: 20px;
+    background-color: #ffffffcc;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    width: 100%;
+}
+
+form label {
+    margin-right: 10px;
+}
+
+form select {
+    margin-right: 20px;
+}
+
+form button {
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.bird {
+    background-image: url(https://s3-us-west-2.amazonaws.com/s.cdpn.io/174479/bird-cells-new.svg);
+    filter: invert(34%) sepia(55%) saturate(427%) hue-rotate(141deg) brightness(93%) contrast(91%);
+    background-size: auto 100%;
+    width: 88px;
+    height: 125px;
+    z-index: 10;
+    will-change: background-position;
+    animation-name: fly-cycle;
+    animation-timing-function: steps(10);
+    animation-iteration-count: infinite;
+}
+
+/* Individual bird animations with random durations and delays */
+.bird-one { animation-duration: 1.0s; animation-delay: -5.0s; }
+.bird-two { animation-duration: 1.1s; animation-delay: -4.0s; }
+.bird-three { animation-duration: 1.2s; animation-delay: -6.0s; }
+.bird-four { animation-duration: 1.3s; animation-delay: -3.0s; }
+.bird-five { animation-duration: 1.4s; animation-delay: -2.0s; }
+.bird-six { animation-duration: 1.5s; animation-delay: -1.0s; }
+.bird-seven { animation-duration: 1.6s; animation-delay: -7.0s; }
+.bird-eight { animation-duration: 1.7s; animation-delay: -8.0s; }
+.bird-nine { animation-duration: 1.8s; animation-delay: -9.0s; }
+.bird-ten { animation-duration: 1.9s; animation-delay: -10.0s; }
+.bird-eleven { animation-duration: 2.0s; animation-delay: -6.5s; }
+.bird-twelve { animation-duration: 2.1s; animation-delay: -4.5s; }
+.bird-thirteen { animation-duration: 2.2s; animation-delay: -5.5s; }
+.bird-fourteen { animation-duration: 2.3s; animation-delay: -3.5s; }
+.bird-fifteen { animation-duration: 2.4s; animation-delay: -2.5s; }
+.bird-sixteen { animation-duration: 2.5s; animation-delay: -1.5s; }
+.bird-seventeen { animation-duration: 2.6s; animation-delay: -7.5s; }
+.bird-eighteen { animation-duration: 2.7s; animation-delay: -8.5s; }
+.bird-nineteen { animation-duration: 2.8s; animation-delay: -9.5s; }
+.bird-twenty { animation-duration: 2.9s; animation-delay: -10.5s; }
+.bird-twenty-one { animation-duration: 3.0s; animation-delay: -6.25s; }
+.bird-twenty-two { animation-duration: 3.1s; animation-delay: -4.25s; }
+.bird-twenty-three { animation-duration: 3.2s; animation-delay: -5.25s; }
+.bird-twenty-four { animation-duration: 3.3s; animation-delay: -3.25s; }
+.bird-twenty-five { animation-duration: 3.4s; animation-delay: -2.25s; }
+.bird-twenty-six { animation-duration: 3.5s; animation-delay: -1.25s; }
+.bird-twenty-seven { animation-duration: 3.6s; animation-delay: -7.25s; }
+.bird-twenty-eight { animation-duration: 3.7s; animation-delay: -8.25s; }
+.bird-twenty-nine { animation-duration: 3.8s; animation-delay: -9.25s; }
+.bird-thirty { animation-duration: 3.9s; animation-delay: -10.25s; }
+
+.bird-container {
+    position: absolute;
+    left: -10%;
+    transform: scale(0) translateX(-10vw);
+    will-change: transform;
+    z-index: 10;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-name: fly-right-one; /* Default animation */
+}
+
+/* Randomized bird container heights and animation delays */
+.bird-container-one { animation-duration: 25s; animation-delay: 0s; top: 1%; }
+.bird-container-two { animation-duration: 22s; animation-delay: 1s; top: 4%; }
+.bird-container-three { animation-duration: 20s; animation-delay: 9s; top: 7%; }
+.bird-container-four { animation-duration: 28s; animation-delay: 10s; top: 10%; }
+.bird-container-five { animation-duration: 26s; animation-delay: 5s; top: 13%; }
+.bird-container-six { animation-duration: 24s; animation-delay: 3s; top: 16%; }
+.bird-container-seven { animation-duration: 23s; animation-delay: 4s; top: 19%; }
+.bird-container-eight { animation-duration: 27s; animation-delay: 6s; top: 22%; }
+.bird-container-nine { animation-duration: 30s; animation-delay: 7s; top: 26%; }
+.bird-container-ten { animation-duration: 21s; animation-delay: 2s; top: 29%; }
+.bird-container-eleven { animation-duration: 19s; animation-delay: 2s; top: 32%; }
+.bird-container-twelve { animation-duration: 25s; animation-delay: 3s; top: 35%; }
+.bird-container-thirteen { animation-duration: 22s; animation-delay: 4s; top: 38%; }
+.bird-container-fourteen { animation-duration: 20s; animation-delay: 5s; top: 42%; }
+.bird-container-fifteen { animation-duration: 28s; animation-delay: 1s; top: 45%; }
+.bird-container-sixteen { animation-duration: 26s; animation-delay: 8s; top: 47%; }
+.bird-container-seventeen { animation-duration: 24s; animation-delay: 9s; top: 49%; }
+.bird-container-eighteen { animation-duration: 23s; animation-delay: 10s; top: 52%; }
+.bird-container-nineteen { animation-duration: 27s; animation-delay: 5.5s; top: 55%; }
+.bird-container-twenty { animation-duration: 30s; animation-delay: 6.5s; top: 59%; }
+.bird-container-twenty-one { animation-duration: 21s; animation-delay: 3.5s; top: 62%; }
+.bird-container-twenty-two { animation-duration: 19s; animation-delay: 4.5s; top: 65%; }
+.bird-container-twenty-three { animation-duration: 25s; animation-delay: 5.5s; top: 70%; }
+.bird-container-twenty-four { animation-duration: 22s; animation-delay: 6.5s; top: 74%; }
+.bird-container-twenty-five { animation-duration: 20s; animation-delay: 7.5s; top: 78%; }
+.bird-container-twenty-six { animation-duration: 28s; animation-delay: 8.5s; top: 82%; }
+.bird-container-twenty-seven { animation-duration: 26s; animation-delay: 9.5s; top: 85%; }
+.bird-container-twenty-eight { animation-duration: 24s; animation-delay: 10.5s; top: 88%; }
+.bird-container-twenty-nine { animation-duration: 23s; animation-delay: 6s; top: 92%; }
+.bird-container-thirty { animation-duration: 27s; animation-delay: 7s; top: 96%; }
+
+@keyframes fly-cycle {
+    100% {
+        background-position: -900px 0;
+    }
+}
+
+@keyframes fly-right-one {
+    0% {
+        transform: scale(0.3) translateX(-10vw);
+    }
+    10% {
+        transform: translateY(2vh) translateX(10vw) scale(0.4);
+    }
+    20% {
+        transform: translateY(0vh) translateX(30vw) scale(0.5);
+    }
+    30% {
+        transform: translateY(4vh) translateX(50vw) scale(0.6);
+    }
+    40% {
+        transform: translateY(2vh) translateX(70vw) scale(0.6);
+    }
+    50% {
+        transform: translateY(0vh) translateX(90vw) scale(0.6);
+    }
+    60% {
+        transform: translateY(0vh) translateX(110vw) scale(0.6);
+    }
+    100% {
+        transform: translateY(0vh) translateX(110vw) scale(0.6);
+    }
+}
+
+@keyframes fly-right-two {
+    0% {
+        transform: translateY(-2vh) translateX(-10vw) scale(0.5);
+    }
+    10% {
+        transform: translateY(0vh) translateX(10vw) scale(0.4);
+    }
+    20% {
+        transform: translateY(-4vh) translateX(30vw) scale(0.6);
+    }
+    30% {
+        transform: translateY(1vh) translateX(50vw) scale(0.45);
+    }
+    40% {
+        transform: translateY(-2.5vh) translateX(70vw) scale(0.5);
+    }
+    50% {
+        transform: translateY(0vh) translateX(90vw) scale(0.45);
+    }
+    51% {
+        transform: translateY(0vh) translateX(110vw) scale(0.45);
+    }
+    100% {
+        transform: translateY(0vh) translateX(110vw) scale(0.45);
+    }
+}

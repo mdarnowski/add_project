@@ -6,116 +6,104 @@
     <title>Bird Dataset</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
-    <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            background: linear-gradient(to right, #a2d9ff, #2d6dff);
-            margin: 20px;
-        }
-        .container {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-around;
-        }
-        .card {
-            border: none;
-            margin: 10px;
-            width: 18rem;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-            overflow: hidden;
-            background-color: #fff;
-        }
-
-        .card img {
-            width: 100%;
-            height: auto;
-        }
-
-        .card-body {
-            padding: 15px;
-        }
-
-        .card-title {
-            font-size: 1.25rem;
-            font-weight: bold;
-        }
-
-        .card-text {
-            font-size: 1rem;
-            color: #666;
-        }
-        .progress {
-            margin-top: 20px;
-            height: 30px;
-        }
-        .progress-bar {
-            font-weight: bold;
-        }
-        .progress-bar-label {
-            margin-top: 5px;
-            text-align: center;
-            font-weight: bold;
-        }
-        #training-chart-container {
-            width: 100%;
-            margin-top: 40px;
-            padding: 20px;
-            background-color: #ffffffcc;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-        .button-container {
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-        }
-        .button-container button {
-            flex: 1;
-            margin: 0 5px;
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            color: #fff;
-        }
-        .button-container button:first-child {
-            background-color: #28a745;
-        }
-        .button-container button:last-child {
-            background-color: #17a2b8;
-        }
-        form {
-            margin-top: 20px;
-            background-color: #ffffffcc;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            width: 100%;
-        }
-        form label {
-            margin-right: 10px;
-        }
-        form select {
-            margin-right: 20px;
-        }
-        form button {
-            background-color: #007bff;
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-        }
-        .text-center {
-            text-align: center;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/styles.css') }}">
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center w-100">Bird Dataset</h1>
+        <h1 class="rainbow-text" style="font-size: 70px">Bird Dataset</h1>
         <div class="button-container w-100">
-            <button id="triggerButton"><i class="fas fa-dove"></i> Go! go! produce</button>
+            <button id="triggerButton"><i class="fas fa-dove"></i> Go! go! Produce!</button>
             <button id="startTrainingButton"><i class="fas fa-play"></i> Start Training</button>
+        </div>
+        <div class="bird-container bird-container-one">
+            <div class="bird bird-one"></div>
+        </div>
+        <div class="bird-container bird-container-two">
+            <div class="bird bird-two"></div>
+        </div>
+        <div class="bird-container bird-container-three">
+            <div class="bird bird-three"></div>
+        </div>
+        <div class="bird-container bird-container-four">
+            <div class="bird bird-four"></div>
+        </div>
+        <div class="bird-container bird-container-five">
+            <div class="bird bird-five"></div>
+        </div>
+        <div class="bird-container bird-container-six">
+            <div class="bird bird-six"></div>
+        </div>
+        <div class="bird-container bird-container-seven">
+            <div class="bird bird-seven"></div>
+        </div>
+        <div class="bird-container bird-container-eight">
+            <div class="bird bird-eight"></div>
+        </div>
+        <div class="bird-container bird-container-nine">
+            <div class="bird bird-nine"></div>
+        </div>
+        <div class="bird-container bird-container-ten">
+            <div class="bird bird-ten"></div>
+        </div>
+        <div class="bird-container bird-container-eleven">
+            <div class="bird bird-eleven"></div>
+        </div>
+        <div class="bird-container bird-container-twelve">
+            <div class="bird bird-twelve"></div>
+        </div>
+        <div class="bird-container bird-container-thirteen">
+            <div class="bird bird-thirteen"></div>
+        </div>
+        <div class="bird-container bird-container-fourteen">
+            <div class="bird bird-fourteen"></div>
+        </div>
+        <div class="bird-container bird-container-fifteen">
+            <div class="bird bird-fifteen"></div>
+        </div>
+        <div class="bird-container bird-container-sixteen">
+            <div class="bird bird-sixteen"></div>
+        </div>
+        <div class="bird-container bird-container-seventeen">
+            <div class="bird bird-seventeen"></div>
+        </div>
+        <div class="bird-container bird-container-eighteen">
+            <div class="bird bird-eighteen"></div>
+        </div>
+        <div class="bird-container bird-container-nineteen">
+            <div class="bird bird-nineteen"></div>
+        </div>
+        <div class="bird-container bird-container-twenty">
+            <div class="bird bird-twenty"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-one">
+            <div class="bird bird-twenty-one"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-two">
+            <div class="bird bird-twenty-two"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-three">
+            <div class="bird bird-twenty-three"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-four">
+            <div class="bird bird-twenty-four"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-five">
+            <div class="bird bird-twenty-five"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-six">
+            <div class="bird bird-twenty-six"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-seven">
+            <div class="bird bird-twenty-seven"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-eight">
+            <div class="bird bird-twenty-eight"></div>
+        </div>
+        <div class="bird-container bird-container-twenty-nine">
+            <div class="bird bird-twenty-nine"></div>
+        </div>
+        <div class="bird-container bird-container-thirty">
+            <div class="bird bird-thirty"></div>
         </div>
 
         <div class="w-100">
