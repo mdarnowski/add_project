@@ -1,21 +1,73 @@
-<div class="container">
-    {% if images %}
-        {% for image in images %}
-        <div class="card">
-            <h2>{{ image.species }}</h2>
-            <p>Set Type: {{ image.set_type }}</p>
-            <p>Image Path: {{ image.image_path }}</p>
-            <p>Image Type: {{ image.image_type }}</p>
-            {% if image.image %}
-            <div>
-                <img src="data:image/jpeg;base64,{{ image.image }}" alt="{{ image.image_type }} Image">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(to right, #a2d9ff, #2d6dff);
+            margin: 20px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+        }
+        .card {
+            border: none;
+            margin: 10px;
+            width: 18rem;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background-color: #ffffffcc;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .card img {
+            max-width: 100%;
+            height: auto;
+        }
+        .card h2 {
+            font-size: 1.25rem;
+            margin: 0.5rem 0;
+            padding: 0 1rem;
+        }
+        .card p {
+            margin: 0.5rem 1rem;
+        }
+        .card img {
+            border-bottom: 1px solid #ddd;
+            padding: 10px;
+        }
+        .text-center {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if images %}
+            {% for image in images %}
+            <div class="card">
+                <h2>{{ image.species }}</h2>
+                <p><strong>Set Type:</strong> {{ image.set_type }}</p>
+                <p><strong>Image Path:</strong> {{ image.image_path }}</p>
+                <p><strong>Image Type:</strong> {{ image.image_type }}</p>
+                {% if image.image %}
+                <div class="text-center">
+                    <img src="data:image/jpeg;base64,{{ image.image }}" alt="{{ image.image_type }} Image">
+                </div>
+                {% else %}
+                <p class="text-center"><em>No image available</em></p>
+                {% endif %}
             </div>
-            {% else %}
-            <p>No image available</p>
-            {% endif %}
-        </div>
-        {% endfor %}
-    {% else %}
-        <p>No results found.</p>
-    {% endif %}
-</div>
+            {% endfor %}
+        {% else %}
+            <p class="text-center"><em>No results found.</em></p>
+        {% endif %}
+    </div>
+</body>
+</html>
