@@ -40,13 +40,23 @@
             width: 100%;
             margin-top: 20px;
         }
+        .button-container {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .button-container button {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <h1>Bird Dataset</h1>
-
-    <button id="triggerButton">Go! go! produce</button>
-
+    <div class="button-container">
+        <button id="triggerButton">Go! go! produce</button>
+        <button id="startTrainingButton">Start Training</button>
+    </div>
     <div id="progress-container">
         <div id="progress-bar">0%</div>
     </div>
@@ -107,6 +117,16 @@
                     });
             });
 
+             $('#startTrainingButton').on('click', function() {
+                    fetch('/start_training', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            alert(data.message);
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                        });
+                });
             function fetchProgress() {
                 $.get('/progress', function(data) {
                     const progressBar = $('#progress-bar');

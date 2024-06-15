@@ -208,10 +208,10 @@ async def index(request: Request):
 
 @app.get("/search", response_class=HTMLResponse)
 async def search(
-    request: Request,
-    image_type: str = Query(None),
-    species: str = Query(None),
-    set_type: str = Query(None),
+        request: Request,
+        image_type: str = Query(None),
+        species: str = Query(None),
+        set_type: str = Query(None),
 ):
     """
     Serve the search results page based on the query parameters.
@@ -281,6 +281,32 @@ def get_latest_metrics():
         return {"epochs": latest_training["epochs"]}
     else:
         return {"epochs": []}
+
+
+@app.post("/start_training")
+def start_training():
+    """
+    Start training via RabbitMQ.
+
+    Returns
+    -------
+    dict
+        Confirmation message for starting training.
+    """
+    images_in_db_count = images_collection.count_documents({"image_type": "processed"})
+    if progress["processed"] == 0:
+        return {
+            "message": "Producer has not started producing images, please start producing first."}
+    elif images_in_db_count >= progress["total"]:
+        connection = connect_to_rabbitmq()
+        channel = connection.channel()
+        channel.queue_declare(queue="training_queue")
+        channel.basic_publish(exchange="", routing_key="training_queue", body="")
+        connection.close()
+        return {"message": "All images processed, starting training..."}
+    else:
+        return {
+            "message": f"Not all images processed, cannot start training (images: {images_in_db_count} / {progress['total']})"}
 
 
 @app.post("/trigger_processing")

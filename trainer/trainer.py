@@ -102,11 +102,17 @@ class Trainer:
                 self.channel.queue_declare(queue="image_queue_downloader")
                 self.channel.queue_declare(queue="data_request_queue")
                 self.channel.queue_declare(queue="num_classes_queue")
+                self.channel.queue_declare(queue="training_queue")
                 logger.info("Connected to RabbitMQ.")
                 # Start consuming num_classes before requesting data
                 self.channel.basic_consume(
                     queue="num_classes_queue",
                     on_message_callback=self.receive_num_classes,
+                    auto_ack=True,
+                )
+                self.channel.basic_consume(
+                    queue="training_queue",
+                    on_message_callback=self.start_training_callback,
                     auto_ack=True,
                 )
                 break
@@ -173,7 +179,7 @@ class Trainer:
 
     def check_all_done(self) -> None:
         if all(self.done_signals.values()) and self.num_classes is not None:
-            logger.info("All splits received 'done' signal. Starting training...")
+            logger.info("All splits received 'done' signal. Training ready.")
             self.train_and_evaluate_model()
 
     def start_consuming(self) -> None:
@@ -192,6 +198,12 @@ class Trainer:
             ):
                 logger.warning("Connection lost, reconnecting...")
                 self.connect_to_rabbitmq()
+
+    def start_training_callback(self, ch, method, properties, body) -> None:
+        logger.info("Received start training signal. Starting training process...")
+        self.send_request("train")
+        self.send_request("val")
+        self.send_request("test")
 
     def create_model(self) -> Model:
         base_model = InceptionV3(include_top=False, input_shape=(299, 299, 3))
@@ -348,9 +360,5 @@ if __name__ == "__main__":
             logger.error(e)
 
     trainer = Trainer()
-    # Send requests for different splits
-    trainer.send_request("train")
-    trainer.send_request("val")
-    trainer.send_request("test")
     # Start consuming messages
     trainer.start_consuming()
