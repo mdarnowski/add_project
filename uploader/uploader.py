@@ -56,7 +56,7 @@ class ImageUploader:
                     pika.ConnectionParameters(RABBITMQ_HOST)
                 )
                 self.channel = self.connection.channel()
-                self.channel.queue_declare(queue="TRAINING_METRICS_QUEUE")
+                self.channel.queue_declare(queue=TRAINING_METRICS_QUEUE)
                 self.channel.queue_declare(queue=RAW_IMAGE_QUEUE)
                 self.channel.queue_declare(queue=PROCESSED_IMAGE_QUEUE)
                 logger.info("Connected to RabbitMQ.")
