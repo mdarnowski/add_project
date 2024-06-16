@@ -83,6 +83,7 @@ class ImageUploader:
                     }
                 )
                 logger.info(f"Saved image {filename} with ID: {image_id}")
+
             except errors.DuplicateKeyError:
                 logger.info(
                     f"Duplicate image ({filename}, {image_type}) detected in db."
@@ -90,21 +91,7 @@ class ImageUploader:
                 )
                 self.fs.delete(image_id)
                 return False
-
-            image_id = self.fs.put(image_data, filename=message["image_path"])
-            self.images_collection.insert_one(
-                {
-                    "filename": message["image_path"],
-                    "image_id": image_id,
-                    "image_type": image_type,
-                    "species": message["species"],
-                    "set_type": message["split"],
-                    "label": message["label"],
-                }
-            )
-            logger.info(f"Saved image {message['image_path']} with ID: {image_id}")
             return True
-
         except Exception as e:
             logger.error(f"Error saving image: {e}")
             return False
