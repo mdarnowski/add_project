@@ -134,7 +134,12 @@
                 <div class="progress-bar progress-bar-striped bg-primary" id="progress-bar-processed-uploader" role="progressbar" style="width: 0%">0%</div>
             </div>
             <div class="progress-bar-label">Processed Uploader Progress</div>
-        </div>
+
+            <div class="progress">
+                <div class="progress-bar progress-bar-striped bg-danger" id="progress-bar-training" role="progressbar" style="width: 0%">0%</div>
+            </div>
+                <div class="progress-bar-label">Training Progress</div>
+            </div>
 
         <div id="training-chart-container">
             <canvas id="trainingChart" width="400" height="200"></canvas>
@@ -224,6 +229,7 @@
                         progressBarRawUploader.text(Math.floor(percentageRawUploader) + '%');
                         progressBarProcessedUploader.css('width', percentageProcessedUploader + '%');
                         progressBarProcessedUploader.text(Math.floor(percentageProcessedUploader) + '%');
+
                     } else {
                         progressBarProducer.css('width', '0%');
                         progressBarProducer.text('0%');
@@ -305,11 +311,16 @@
                 const response = await fetch('/latest_metrics');
                 const data = await response.json();
 
+                const totalEpochs = data.epochs[0].total_epochs;
                 const epochs = data.epochs.map(epoch => `${epoch.epoch} (${epoch.phase})`);
                 const trainingLoss = data.epochs.map(epoch => epoch.loss);
                 const validationLoss = data.epochs.map(epoch => epoch.val_loss);
                 const trainingAccuracy = data.epochs.map(epoch => epoch.accuracy);
                 const validationAccuracy = data.epochs.map(epoch => epoch.val_accuracy);
+                const progress = data.epochs.map((epoch, index) => ((index + 1) / totalEpochs) * 100);
+                const progressBarTraining = $('#progress-bar-training');
+                progressBarTraining.css('width', progress.at(-1) + '%');
+                progressBarTraining.text(Math.floor(progress.at(-1)) + '%');
 
                 trainingChart.data.labels = epochs;
                 trainingChart.data.datasets[0].data = trainingLoss;

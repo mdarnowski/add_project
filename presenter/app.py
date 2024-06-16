@@ -48,6 +48,7 @@ progress_producer = {
     "processed": 0,
     "uploaded_raw": 0,
     "uploaded_processed": 0,
+    "training_progress": 0,
     "total": 0,
 }
 
@@ -340,6 +341,7 @@ def start_training():
         channel = connection.channel()
         channel.queue_declare(queue="training_queue")
         channel.basic_publish(exchange="", routing_key="training_queue", body="")
+        progress_producer["training_progress"] = 0
         connection.close()
         return {"message": "All images processed, starting training..."}
     else:
