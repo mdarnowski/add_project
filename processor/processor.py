@@ -88,9 +88,11 @@ class RabbitMQProcessor:
                 self.channel.queue_declare(queue=self.processed_image_queue)
                 self.channel.queue_declare(queue=self.processor_progress_queue)
                 logger.info("Connected to RabbitMQ.")
-            except AMQPConnectionError:
-                logger.warning("RabbitMQ not available, retrying in 5 seconds...")
+            except (AMQPConnectionError, ConnectionClosed):
+                logger.warning("RabbitMQ not available or connection closed, retrying in 5 seconds...")
                 time.sleep(5)
+                self.connection = None
+                self.channel = None
 
     def transform_image(self, image_data, split):
         """
@@ -193,27 +195,35 @@ class RabbitMQProcessor:
         Starts consuming messages from the raw image queue and processes them.
 
         Declares the raw image queue and sets up a callback to handle messages.
+        Retries consuming if the connection is lost.
         """
-        if self.channel is None or self.channel.is_closed:
-            self.connect_to_rabbitmq()
+        while True:
+            try:
+                if self.channel is None or self.channel.is_closed:
+                    self.connect_to_rabbitmq()
 
-        self.channel.queue_declare(queue=self.raw_image_queue)
+                self.channel.queue_declare(queue=self.raw_image_queue)
 
-        def callback(ch, method, properties, body):
-            message = json.loads(body)
-            if message.get("reset"):
-                self.reset_counter()
-            else:
-                self.send_to_queue(message)
-                logger.info(
-                    f"Processed and sent message for image_path: {message['image_path']}"
+                def callback(ch, method, properties, body):
+                    message = json.loads(body)
+                    if message.get("reset"):
+                        self.reset_counter()
+                    else:
+                        self.send_to_queue(message)
+                        logger.info(
+                            f"Processed and sent message for image_path: {message['image_path']}"
+                        )
+
+                self.channel.basic_consume(
+                    queue=self.raw_image_queue, on_message_callback=callback, auto_ack=True
                 )
-
-        self.channel.basic_consume(
-            queue=self.raw_image_queue, on_message_callback=callback, auto_ack=True
-        )
-        logger.info("Processor is listening for messages...")
-        self.channel.start_consuming()
+                logger.info("Processor is listening for messages...")
+                self.channel.start_consuming()
+            except (AMQPConnectionError, ConnectionClosed) as e:
+                logger.error(f"Connection lost or closed. Reconnecting... Error: {e}")
+                self.connection = None
+                self.channel = None
+                time.sleep(5)
 
 
 if __name__ == "__main__":
