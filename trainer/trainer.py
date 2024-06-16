@@ -87,14 +87,18 @@ class Trainer:
         self.rabbitmq_host = RABBITMQ_HOST
         self.connection = None
         self.channel = None
+        self.tfrecord_writers = {}
+        self.done_signals = {}
+        self.num_classes = None
+        self.connect_to_rabbitmq()
+
+    def initialize_writers(self) -> None:
         self.tfrecord_writers = {
             "train": tf.io.TFRecordWriter("train.tfrecord"),
             "val": tf.io.TFRecordWriter("val.tfrecord"),
             "test": tf.io.TFRecordWriter("test.tfrecord"),
         }
         self.done_signals = {"train": False, "val": False, "test": False}
-        self.num_classes = None
-        self.connect_to_rabbitmq()
 
     def connect_to_rabbitmq(self) -> None:
         while True:
@@ -155,7 +159,6 @@ class Trainer:
         if split is None:
             logger.error("Message missing 'split' key.")
             return
-
         if message.get("status") == "done":
             logger.info(f"Received 'done' signal for {split} split")
             self.tfrecord_writers[split].close()
@@ -205,6 +208,7 @@ class Trainer:
 
     def start_training_callback(self, ch, method, properties, body) -> None:
         logger.info("Received start training signal. Starting training process...")
+        self.initialize_writers()
         self.send_request("train")
         self.send_request("val")
         self.send_request("test")
