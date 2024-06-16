@@ -204,6 +204,20 @@ async def index(request: Request):
     )
 
 
+@app.get("/get_species_list")
+async def get_species_list():
+    """
+    Get the updated species list from the database.
+
+    Returns
+    -------
+    list
+        List of species.
+    """
+    species_list = images_collection.distinct("species")
+    return {"species_list": species_list}
+
+
 @app.get("/search", response_class=HTMLResponse)
 async def search(
     request: Request,

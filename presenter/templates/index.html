@@ -346,6 +346,17 @@
             };
 
             fetchLatestMetrics();
+
+            $('#updateSpeciesListButton').on('click', function() {
+                $.get('/get_species_list', function(data) {
+                    const speciesSelect = $('#species');
+                    speciesSelect.empty();
+                    speciesSelect.append('<option value="">Select Species</option>');
+                    data.species_list.forEach(species => {
+                        speciesSelect.append(`<option value="${species}">${species}</option>`);
+                    });
+                });
+            });
         });
     </script>
 </body>

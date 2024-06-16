@@ -52,21 +52,26 @@ class Predictor:
                 model = tf.keras.models.load_model("downloaded_model.keras")
                 print("Downloaded and loaded new model.")
                 return model, latest_file.uploadDate
-            else:
-                print("No new model found in GridFS.")
-                return self.model, self.current_model_upload_date
+            print("No new model found in GridFS.")
+            return self.model, self.current_model_upload_date
         except Exception as e:
             print(f"Error downloading model: {e}")
             return self.model, self.current_model_upload_date
 
     def check_and_update_model(self):
         while True:
-            print("Checking for a new model...")
-            new_model, new_upload_date = self.download_model()
-            if new_model and new_upload_date > self.current_model_upload_date:
-                self.model = new_model
-                self.current_model_upload_date = new_upload_date
-                print("Model updated.")
+            try:
+                print("Checking for a new model...")
+                new_model, new_upload_date = self.download_model()
+                if new_model and (
+                    self.current_model_upload_date is None
+                    or new_upload_date > self.current_model_upload_date
+                ):
+                    self.model = new_model
+                    self.current_model_upload_date = new_upload_date
+                    print("Model updated.")
+            except Exception as e:
+                print(f"Error during model check: {e}")
             time.sleep(CHECK_INTERVAL)
 
     def start_model_check_thread(self):
@@ -77,12 +82,9 @@ class Predictor:
     def preprocess_image(image_data):
         try:
             image = Image.open(io.BytesIO(image_data))
+            image = image.resize((299, 299))
             image_array = np.array(image)
-            image_array = np.expand_dims(image_array, axis=0)
-            image_array = tf.keras.applications.inception_v3.preprocess_input(
-                image_array
-            )
-            return image_array
+            return tf.cast(image_array, tf.float32) / 255.0
         except Exception as e:
             print(f"Error preprocessing image: {e}")
             return None
@@ -98,26 +100,24 @@ class Predictor:
         return int(predicted_label[0])
 
     def connect_to_rabbitmq(self):
-        try:
-            self.connection = pika.BlockingConnection(
-                pika.ConnectionParameters(host=RABBITMQ_HOST)
-            )
-            self.channel = self.connection.channel()
-            self.channel.queue_declare(queue=TO_PREDICT_QUEUE)
-            self.channel.queue_declare(queue=PREDICTION_QUEUE)
-            self.channel.basic_consume(
-                queue=TO_PREDICT_QUEUE,
-                on_message_callback=self.on_request,
-                auto_ack=True,
-            )
-        except Exception as e:
-            print(f"Error connecting to RabbitMQ: {e}")
-            self.reconnect_to_rabbitmq()
-
-    def reconnect_to_rabbitmq(self):
-        if self.connection:
-            self.connection.close()
-        self.connect_to_rabbitmq()
+        while True:
+            try:
+                self.connection = pika.BlockingConnection(
+                    pika.ConnectionParameters(host=RABBITMQ_HOST)
+                )
+                self.channel = self.connection.channel()
+                self.channel.queue_declare(queue=TO_PREDICT_QUEUE)
+                self.channel.queue_declare(queue=PREDICTION_QUEUE)
+                self.channel.basic_consume(
+                    queue=TO_PREDICT_QUEUE,
+                    on_message_callback=self.on_request,
+                    auto_ack=True,
+                )
+                print("Connected to RabbitMQ.")
+                break
+            except pika.exceptions.AMQPConnectionError:
+                print("RabbitMQ not available, retrying in 5 seconds...")
+                time.sleep(5)
 
     def on_request(self, _ch, _method, _properties, body):
         try:
