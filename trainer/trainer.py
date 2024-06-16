@@ -26,8 +26,9 @@ CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks
 
 
 class RabbitMQLoggerCallback(Callback):
-    def __init__(self):
+    def __init__(self, total_epochs: int):
         super().__init__()
+        self.total_epochs = total_epochs
         self.training_id = str(datetime.now())
         self.phase = None
         self.connection = None
@@ -59,6 +60,7 @@ class RabbitMQLoggerCallback(Callback):
             "accuracy": logs.get("accuracy"),
             "val_loss": logs.get("val_loss"),
             "val_accuracy": logs.get("val_accuracy"),
+            "total_epochs": self.total_epochs,
         }
         print("Epoch metrics: sending", epoch_metrics)
 
@@ -237,7 +239,8 @@ class Trainer:
         train_tfrecord_path = "train.tfrecord"
         val_tfrecord_path = "val.tfrecord"
         test_tfrecord_path = "test.tfrecord"
-
+        frozen_epochs = 1
+        unfrozen_epochs = 3
         train_dataset = load_tfrecord_dataset(
             train_tfrecord_path, batch_size, shuffle_buffer_size, self.num_classes
         )
@@ -268,14 +271,14 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        rabbitmq_logger = RabbitMQLoggerCallback()
+        rabbitmq_logger = RabbitMQLoggerCallback(frozen_epochs+unfrozen_epochs)
 
         print("Training with frozen base model...")
         rabbitmq_logger.phase = "frozen"
         try:
             model.fit(
                 train_dataset,
-                epochs=1,
+                epochs=frozen_epochs,
                 validation_data=val_dataset,
                 steps_per_epoch=steps_per_epoch_train,
                 validation_steps=steps_per_epoch_val,
@@ -299,7 +302,7 @@ class Trainer:
         rabbitmq_logger.phase = "unfrozen"
         model.fit(
             train_dataset,
-            epochs=3,
+            epochs=unfrozen_epochs,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
