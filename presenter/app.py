@@ -1,52 +1,3 @@
-"""
-Web Application Module
-================================
-
-This module provides a web application for managing and processing images using FastAPI.
-It integrates with RabbitMQ for messaging and MongoDB/GridFS for image storage.
-
-Modules
--------
-
-- `base64`
-- `json`
-- `logging`
-- `threading`
-- `time`
-- `gridfs`
-- `pika`
-- `uvicorn`
-- `fastapi`
-- `fastapi.middleware.cors`
-- `fastapi.responses`
-- `fastapi.templating`
-- `pika.exceptions`
-- `pymongo`
-
-Attributes
-----------
-
-- `MONGO_URI`: MongoDB connection URI.
-- `client`: MongoDB client.
-- `db`: MongoDB database.
-- `images_collection`: MongoDB collection for images.
-- `fs`: GridFS object for storing images.
-- `app`: FastAPI application instance.
-- `templates`: Jinja2Templates object for HTML rendering.
-- `progress`: Global dictionary to store processing progress.
-
-Functions
----------
-
-- `connect_to_rabbitmq()`: Connect to RabbitMQ server with retry on failure.
-- `get_image(image_id)`: Retrieve image from GridFS and encode it in base64.
-- `consume_progress_updates()`: Consume progress updates from RabbitMQ.
-- `index(request: Request)`: Serve the main index page.
-- `search(request: Request, image_type: str, species: str, set_type: str)`: Serve the search results page.
-- `get_progress()`: Return current processing progress.
-- `trigger_processing()`: Trigger image processing via RabbitMQ.
-"""
-
 import base64
 import json
 import logging
@@ -99,6 +50,9 @@ progress_producer = {
     "uploaded_processed": 0,
     "total": 0,
 }
+
+TO_PREDICT_QUEUE = "to_predict_queue"
+PREDICTION_QUEUE = "prediction_queue"
 
 
 # WebSocket manager
@@ -284,16 +238,59 @@ async def search(
 
     images_cursor = images_collection.find(query).limit(100)
     images = []
+    predictions = []
+
+    # Connect to RabbitMQ
+    connection = connect_to_rabbitmq()
+    channel = connection.channel()
+    channel.queue_declare(queue=TO_PREDICT_QUEUE)
+    channel.queue_declare(queue=PREDICTION_QUEUE)
+
+    def on_response(ch, method, properties, body):
+        response = json.loads(body)
+        predictions.append(response["predicted_label"])
+
+    channel.basic_consume(
+        queue=PREDICTION_QUEUE,
+        on_message_callback=on_response,
+        auto_ack=True,
+    )
+
     for data in images_cursor:
         image_id = data.get("image_id")
+        image_binary = fs.get(image_id).read() if image_id else None
+        image_base64 = (
+            base64.b64encode(image_binary).decode("utf-8") if image_binary else None
+        )
+
+        # Send image data to Predictor service
+        if image_binary:
+            message = {"image_data": base64.b64encode(image_binary).decode("utf-8")}
+            channel.basic_publish(
+                exchange="",
+                routing_key=TO_PREDICT_QUEUE,
+                body=json.dumps(message),
+            )
+
         image_data = {
             "species": data.get("species"),
             "set_type": data.get("set_type"),
             "image_path": data.get("filename"),
             "image_type": data.get("image_type"),
-            "image": get_image(image_id),
+            "image": image_base64,
         }
         images.append(image_data)
+
+    # Start consuming predictions
+    while len(predictions) < len(images):
+        connection.process_data_events()
+
+    # Close RabbitMQ connection
+    connection.close()
+
+    # Add predictions to images
+    for i, image_data in enumerate(images):
+        image_data["prediction"] = predictions[i] if i < len(predictions) else "N/A"
 
     logger.info(f"Images: {images}")
     return templates.TemplateResponse(

@@ -1,105 +1,91 @@
-import json
-import time
-
+import io
 import numpy as np
-import pika
+import tensorflow as tf
 from pymongo import MongoClient
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, Dropout, Flatten
-from tensorflow.keras.models import Model
+import os
+from PIL import Image
+import pika
+import base64
+import json
+import gridfs
 
-# MongoDB setup
-MONGO_URI = "mongodb://mongodb:27017/"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
+MONGO_DB = os.getenv("MONGO_DB", "model_db")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+TO_PREDICT_QUEUE = os.getenv("TO_PREDICT_QUEUE", "to_predict_queue")
+PREDICTION_QUEUE = os.getenv("PREDICTION_QUEUE", "prediction_queue")
+
 client = MongoClient(MONGO_URI)
-db = client.bird_dataset
-weights_collection = db.model_weights  # Collection for model weights
+db = client[MONGO_DB]
+fs = gridfs.GridFS(db)
 
 
-# Model creation
-def create_model() -> Model:
-    """
-    Create a MobileNetV2-based model with custom dense layers.
+class Predictor:
+    def __init__(self):
+        self.model = self.download_model()
+        self.connection = None
+        self.channel = None
+        self.connect_to_rabbitmq()
 
-    Returns:
-        tf.keras.models.Model: Compiled Keras model.
-    """
-    base_model = MobileNetV2(
-        weights="imagenet", include_top=False, input_shape=(224, 224, 3)
-    )
-    x = Flatten()(base_model.output)
-    x = Dense(512, activation="relu")(x)
-    x = Dropout(0.5)(x)
-    predictions = Dense(200, activation="softmax")(x)  # Assuming 200 classes
+    def download_model(self):
+        latest_file = fs.find_one(
+            sort=[("uploadDate", -1)]
+        )  # Get the latest model file from GridFS
+        if latest_file:
+            model_data = latest_file.read()
+            with open("downloaded_model.keras", "wb") as f:
+                f.write(model_data)
+            model = tf.keras.models.load_model("downloaded_model.keras")
+            return model
+        else:
+            return None  # No model found
 
-    model = Model(inputs=base_model.input, outputs=predictions)
-    return model
+    def preprocess_image(self, image_data):
+        image = Image.open(io.BytesIO(image_data))
+        image = image.resize((299, 299))
+        image_array = np.array(image)
+        image_array = np.expand_dims(image_array, axis=0)
+        image_array = tf.keras.applications.inception_v3.preprocess_input(image_array)
+        return image_array
 
+    def predict(self, image_data):
+        if self.model is None:
+            return -1
+        image_array = self.preprocess_image(image_data)
+        predictions = self.model.predict(image_array)
+        predicted_label = np.argmax(predictions, axis=1)
+        return predicted_label
 
-# Instantiate model
-model = create_model()
+    def connect_to_rabbitmq(self):
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        )
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=TO_PREDICT_QUEUE)
+        self.channel.queue_declare(queue=PREDICTION_QUEUE)
+        self.channel.basic_consume(
+            queue=TO_PREDICT_QUEUE,
+            on_message_callback=self.on_request,
+            auto_ack=True,
+        )
 
+    def on_request(self, _ch, _method, _properties, body):
+        message = json.loads(body)
+        image_data = base64.b64decode(message["image_data"])
+        predicted_label = self.predict(image_data)
+        response = {
+            "predicted_label": int(predicted_label) if predicted_label != -1 else -1
+        }
+        self.channel.basic_publish(
+            exchange="",
+            routing_key=PREDICTION_QUEUE,
+            body=json.dumps(response),
+        )
 
-# Load model weights from MongoDB
-def load_weights(weights_id: str) -> None:
-    """
-    Load model weights from MongoDB by weights_id.
-
-    Args:
-        weights_id (str): The identifier for the weights document in MongoDB.
-    """
-    weights_doc = weights_collection.find_one({"_id": weights_id})
-    if weights_doc:
-        weights = [np.array(w) for w in weights_doc["weights"]]
-        model.set_weights(weights)
-        print("Model weights loaded successfully.")
-    else:
-        print("Weights not found in MongoDB.")
-
-
-# Connect to RabbitMQ
-def connect_to_rabbitmq() -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ server with retry on failure.
-
-    Returns:
-        pika.BlockingConnection: RabbitMQ connection object.
-    """
-    while True:
-        try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
-            print("Connected to RabbitMQ.")
-            return connection
-        except pika.exceptions.AMQPConnectionError:
-            print("RabbitMQ not available, retrying in 5 seconds...")
-            time.sleep(5)
-
-
-# Establish RabbitMQ connection and channel
-connection = connect_to_rabbitmq()
-channel = connection.channel()
-channel.queue_declare(queue="trained_model")
-
-
-# Message handler
-def on_weights_received(ch, method, properties, body) -> None:
-    """
-    Callback function to handle incoming weight messages.
-
-    Args:
-        ch: Channel.
-        method: Method.
-        properties: Properties.
-        body: Message body containing weights_id.
-    """
-    message = json.loads(body)
-    weights_id = message["weights_id"]
-    load_weights(weights_id)
+    def start_consuming(self):
+        self.channel.start_consuming()
 
 
-# Start consuming messages
-channel.basic_consume(
-    queue="trained_model", on_message_callback=on_weights_received, auto_ack=True
-)
-
-print("Predictor is waiting for model weights...")
-channel.start_consuming()
+if __name__ == "__main__":
+    predictor = Predictor()
+    predictor.start_consuming()

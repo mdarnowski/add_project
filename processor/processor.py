@@ -1,36 +1,3 @@
-"""
-Image Processor Module
-========================
-
-This module provides functionality to process images through a RabbitMQ queue system.
-Images are received from a queue, transformed, and sent to another queue.
-
-Classes
--------
-- RabbitMQProcessor
-
-Dependencies
-------------
-
-- base64
-- io
-- json
-- os
-- time
-- pika
-- numpy
-- loguru
-- PIL (Pillow)
-- tensorflow
-
-Configuration
--------------
-
-- `RABBITMQ_HOST`: Environment variable for the RabbitMQ host. Defaults to "rabbitmq".
-- `RAW_IMAGE_QUEUE`: Environment variable for the raw image queue name. Defaults to "raw_image_queue".
-- `PROCESSED_IMAGE_QUEUE`: Environment variable for the processed image queue name. Defaults to "processed_image_queue".
-"""
-
 import base64
 import io
 import json
@@ -43,6 +10,14 @@ from loguru import logger
 from pika.exceptions import AMQPConnectionError, ConnectionClosed
 from PIL import Image
 import tensorflow as tf
+
+# Environment variables
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RAW_IMAGE_QUEUE = os.getenv("RAW_IMAGE_QUEUE", "raw_image_queue")
+PROCESSED_IMAGE_QUEUE = os.getenv("PROCESSED_IMAGE_QUEUE", "processed_image_queue")
+PROCESSOR_PROGRESS_QUEUE = os.getenv(
+    "PROCESSOR_PROGRESS_QUEUE", "processor_progress_queue"
+)
 
 
 class RabbitMQProcessor:
@@ -63,8 +38,6 @@ class RabbitMQProcessor:
         Connection object for RabbitMQ.
     channel : pika.channel.Channel
         Channel object for RabbitMQ.
-    total_images : int
-        Total number of images to process.
     processed_images : int
         Count of processed images.
 
@@ -78,6 +51,8 @@ class RabbitMQProcessor:
         Processes the image and sends the transformed image to the processed queue.
     update_progress():
         Sends progress update to the processor progress queue.
+    reset_counter():
+        Resets the processed images counter.
     start_consuming():
         Starts consuming messages from the raw image queue.
     """
@@ -89,17 +64,12 @@ class RabbitMQProcessor:
         Sets up the RabbitMQ host, raw image queue, processed image queue,
         and processor progress queue from environment variables or defaults.
         """
-        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "rabbitmq")
-        self.raw_image_queue = os.getenv("RAW_IMAGE_QUEUE", "raw_image_queue")
-        self.processed_image_queue = os.getenv(
-            "PROCESSED_IMAGE_QUEUE", "processed_image_queue"
-        )
-        self.processor_progress_queue = os.getenv(
-            "PROCESSOR_PROGRESS_QUEUE", "processor_progress_queue"
-        )
+        self.rabbitmq_host = RABBITMQ_HOST
+        self.raw_image_queue = RAW_IMAGE_QUEUE
+        self.processed_image_queue = PROCESSED_IMAGE_QUEUE
+        self.processor_progress_queue = PROCESSOR_PROGRESS_QUEUE
         self.connection = None
         self.channel = None
-        self.total_images = 0
         self.processed_images = 0
         self.connect_to_rabbitmq()
 
@@ -143,7 +113,7 @@ class RabbitMQProcessor:
 
         if split == "train":
             img_array = tf.image.resize(img_array, [299, 299])
-        else:  # val or test
+        else:
             img_array = tf.image.resize(img_array, [299, 299])
 
         img_array = tf.cast(img_array, tf.float32) / 255.0
@@ -203,16 +173,20 @@ class RabbitMQProcessor:
         """
         Sends progress update to the processor progress queue.
         """
-        progress_message = {
-            "processed": self.processed_images,
-            "total": self.total_images,
-        }
+        progress_message = {"processed": self.processed_images}
         self.channel.basic_publish(
             exchange="",
             routing_key=self.processor_progress_queue,
             body=json.dumps(progress_message),
         )
         logger.info(f"Sent progress update: {progress_message}")
+
+    def reset_counter(self):
+        """
+        Resets the processed images counter.
+        """
+        self.processed_images = 0
+        logger.info("Processed images counter reset to 0")
 
     def start_consuming(self):
         """
@@ -227,37 +201,19 @@ class RabbitMQProcessor:
 
         def callback(ch, method, properties, body):
             message = json.loads(body)
-            logger.info(f"Received message for image_path: {message['image_path']}")
-            self.send_to_queue(message)
-            logger.info(
-                f"Processed and sent message for image_path: {message['image_path']}"
-            )
+            if message.get("reset"):
+                self.reset_counter()
+            else:
+                self.send_to_queue(message)
+                logger.info(
+                    f"Processed and sent message for image_path: {message['image_path']}"
+                )
 
-        self.total_images = self.get_queue_length(
-            self.raw_image_queue
-        )  # Set total images at start
         self.channel.basic_consume(
             queue=self.raw_image_queue, on_message_callback=callback, auto_ack=True
         )
         logger.info("Processor is listening for messages...")
         self.channel.start_consuming()
-
-    def get_queue_length(self, queue_name):
-        """
-        Retrieves the length of the queue.
-
-        Parameters
-        ----------
-        queue_name : str
-            Name of the queue.
-
-        Returns
-        -------
-        int
-            Number of messages in the queue.
-        """
-        queue_state = self.channel.queue_declare(queue=queue_name, passive=True)
-        return queue_state.method.message_count
 
 
 if __name__ == "__main__":

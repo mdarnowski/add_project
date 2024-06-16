@@ -101,7 +101,6 @@ services:
       RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
-      - mongodb
     volumes:
       - ./trainer:/app
     networks:
@@ -122,6 +121,21 @@ services:
       - rabbitmq
     volumes:
       - ./predictor:/app
+    networks:
+      - app-network
+
+  model_uploader:
+    build:
+      context: ./model_uploader
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
+    depends_on:
+      - rabbitmq
+      - mongodb
+    volumes:
+      - ./model_uploader:/app
     networks:
       - app-network
 

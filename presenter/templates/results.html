@@ -62,6 +62,7 @@
                 <p><strong>Set Type:</strong> {{ image.set_type }}</p>
                 <p><strong>Image Path:</strong> {{ image.image_path }}</p>
                 <p><strong>Image Type:</strong> {{ image.image_type }}</p>
+                <p><strong>Prediction:</strong> {{ image.prediction }}</p>
                 {% if image.image %}
                 <div class="text-center">
                     <img src="data:image/jpeg;base64,{{ image.image }}" alt="{{ image.image_type }} Image">
