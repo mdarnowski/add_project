@@ -196,12 +196,9 @@ async def index(request: Request):
     Returns
     -------
     HTMLResponse
-        Rendered HTML page with species list.
+        Rendered HTML page.
     """
-    species_list = images_collection.distinct("species")
-    return templates.TemplateResponse(
-        "index.html", {"request": request, "species_list": species_list}
-    )
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/get_species_list")

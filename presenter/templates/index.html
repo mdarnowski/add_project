@@ -155,9 +155,6 @@
             <label for="species">Species:</label>
             <select id="species" name="species" class="form-select d-inline-block w-auto">
                 <option value="">Select Species</option>
-                {% for species in species_list %}
-                    <option value="{{ species }}">{{ species }}</option>
-                {% endfor %}
             </select>
             <label for="set_type">Set Type:</label>
             <select id="set_type" name="set_type" class="form-select d-inline-block w-auto">
@@ -176,6 +173,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         $(document).ready(function() {
+            function updateSpeciesList() {
+                $.get('/get_species_list', function(data) {
+                    const speciesSelect = $('#species');
+                    speciesSelect.empty();
+                    speciesSelect.append('<option value="">Select Species</option>');
+                    data.species_list.forEach(species => {
+                        speciesSelect.append(`<option value="${species}">${species}</option>`);
+                    });
+                });
+            }
+
+            // Fetch the species list when the form is clicked
+            $('#search-form').on('click', updateSpeciesList);
+
             $('#search-form').on('submit', function(e) {
                 e.preventDefault();
                 const image_type = $('#image_type').val();
@@ -346,17 +357,6 @@
             };
 
             fetchLatestMetrics();
-
-            $('#updateSpeciesListButton').on('click', function() {
-                $.get('/get_species_list', function(data) {
-                    const speciesSelect = $('#species');
-                    speciesSelect.empty();
-                    speciesSelect.append('<option value="">Select Species</option>');
-                    data.species_list.forEach(species => {
-                        speciesSelect.append(`<option value="${species}">${species}</option>`);
-                    });
-                });
-            });
         });
     </script>
 </body>
