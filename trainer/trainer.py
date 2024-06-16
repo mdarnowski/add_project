@@ -21,6 +21,8 @@ RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 MODEL_PATH = os.getenv("MODEL_PATH", "model.keras")
 QUEUE_UPLOADER = os.getenv("TRAINING_METRICS_QUEUE", "training_metrics_queue")
 QUEUE_PRESENTER = os.getenv("TRAINING_UPDATES", "training_updates")
+MODEL_CHUNKS_QUEUE = os.getenv("MODEL_CHUNKS_QUEUE", "model_chunks_queue")
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks
 
 
 class RabbitMQLoggerCallback(Callback):
@@ -266,18 +268,18 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        mongo_logger = RabbitMQLoggerCallback()
+        rabbitmq_logger = RabbitMQLoggerCallback()
 
         print("Training with frozen base model...")
-        mongo_logger.phase = "frozen"
+        rabbitmq_logger.phase = "frozen"
         try:
             model.fit(
                 train_dataset,
-                epochs=3,
+                epochs=1,
                 validation_data=val_dataset,
                 steps_per_epoch=steps_per_epoch_train,
                 validation_steps=steps_per_epoch_val,
-                callbacks=[reduce_lr, early_stopping, mongo_logger],
+                callbacks=[reduce_lr, early_stopping, rabbitmq_logger],
             )
         except Exception as e:
             print("Error during model.fit:", e)
@@ -294,17 +296,20 @@ class Trainer:
             metrics=["accuracy"],
         )
 
-        mongo_logger.phase = "unfrozen"
+        rabbitmq_logger.phase = "unfrozen"
         model.fit(
             train_dataset,
             epochs=3,
             validation_data=val_dataset,
             steps_per_epoch=steps_per_epoch_train,
             validation_steps=steps_per_epoch_val,
-            callbacks=[reduce_lr, early_stopping, mongo_logger],
+            callbacks=[reduce_lr, early_stopping, rabbitmq_logger],
         )
 
-        mongo_logger.close_connection()
+        logger.info("Saving model... splitting into chunks")
+        self.save_and_split_model(model)
+
+        rabbitmq_logger.close_connection()
 
         logger.info("Evaluating on test data...")
         test_loss, test_accuracy = model.evaluate(
@@ -312,13 +317,29 @@ class Trainer:
         )
         logger.info(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
 
-        # Check if the model file exists and remove it if so
-        if os.path.exists(MODEL_PATH):
-            logger.info(f"Removing existing model at {MODEL_PATH}...")
-            os.remove(MODEL_PATH)
-
-        logger.info("Saving model...")
+    def save_and_split_model(self, model):
         model.save(MODEL_PATH)
+        with open(MODEL_PATH, "rb") as f:
+            model_data = f.read()
+        total_size = len(model_data)
+        chunks = [
+            model_data[i : i + CHUNK_SIZE] for i in range(0, total_size, CHUNK_SIZE)
+        ]
+        channel = self.connection.channel()
+        channel.queue_declare(queue=MODEL_CHUNKS_QUEUE)
+
+        for i, chunk in enumerate(chunks):
+            message = {
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "data": base64.b64encode(chunk).decode("utf-8"),
+            }
+            channel.basic_publish(
+                exchange="",
+                routing_key=MODEL_CHUNKS_QUEUE,
+                body=json.dumps(message),
+            )
+        logger.info(f"Model split into {len(chunks)} chunks and sent.")
 
 
 def parse_tfrecord(tfrecord):

@@ -124,6 +124,21 @@ services:
     networks:
       - app-network
 
+  model_uploader:
+    build:
+      context: ./model_uploader
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      MONGO_HOST: mongodb
+    depends_on:
+      - rabbitmq
+      - mongodb
+    volumes:
+      - ./model_uploader:/app
+    networks:
+      - app-network
+
 networks:
   app-network:
     driver: bridge

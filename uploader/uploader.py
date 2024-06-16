@@ -112,12 +112,13 @@ class ImageUploader:
     def process_and_save_metrics(self, body: bytes) -> None:
         try:
             message = json.loads(body)
+            timestamp = message.pop("training_id")
             self.metrics_collection.update_one(
-                {"training_id": message["training_id"]},
+                {"timestamp": timestamp},
                 {"$push": {"epochs": message}},
                 upsert=True,
             )
-            logger.info(f"Saved metrics for training ID: {message['training_id']}")
+            logger.info(f"Saved metrics for training ID: {timestamp}")
         except Exception as e:
             logger.error(f"Error saving metrics: {e}")
 
