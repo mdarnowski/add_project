@@ -80,14 +80,12 @@ class Predictor:
 
     @staticmethod
     def preprocess_image(image_data):
-        try:
-            image = Image.open(io.BytesIO(image_data))
-            image = image.resize((299, 299))
-            image_array = np.array(image)
-            return tf.cast(image_array, tf.float32) / 255.0
-        except Exception as e:
-            print(f"Error preprocessing image: {e}")
-            return None
+        image = Image.open(io.BytesIO(image_data))
+        image = image.resize((299, 299))
+        image_array = np.array(image)
+        image_array = np.expand_dims(image_array, axis=0)
+        image_array = tf.keras.applications.inception_v3.preprocess_input(image_array)
+        return image_array
 
     def predict(self, image_data):
         if self.model is None:
