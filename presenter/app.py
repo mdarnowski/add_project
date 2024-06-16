@@ -4,7 +4,6 @@ import logging
 import threading
 import time
 import asyncio
-
 import gridfs
 import pika
 import uvicorn
@@ -127,6 +126,7 @@ def consume_updates():
     channel.queue_declare(queue="raw_uploader_progress_queue")
     channel.queue_declare(queue="processed_uploader_progress_queue")
     channel.queue_declare(queue="training_updates")
+    channel.queue_declare(queue=PREDICTION_QUEUE)
 
     def callback(ch, method, properties, body):
         update = json.loads(body)
@@ -171,6 +171,9 @@ def consume_updates():
     )
     channel.basic_consume(
         queue="training_updates", on_message_callback=callback, auto_ack=True
+    )
+    channel.basic_consume(
+        queue=PREDICTION_QUEUE, on_message_callback=callback, auto_ack=True
     )
     logger.info("Started consuming updates...")
     channel.start_consuming()
@@ -239,23 +242,11 @@ async def search(
 
     images_cursor = images_collection.find(query).limit(100)
     images = []
-    predictions = []
 
     # Connect to RabbitMQ
     connection = connect_to_rabbitmq()
     channel = connection.channel()
     channel.queue_declare(queue=TO_PREDICT_QUEUE)
-    channel.queue_declare(queue=PREDICTION_QUEUE)
-
-    def on_response(ch, method, properties, body):
-        response = json.loads(body)
-        predictions.append(response["predicted_label"])
-
-    channel.basic_consume(
-        queue=PREDICTION_QUEUE,
-        on_message_callback=on_response,
-        auto_ack=True,
-    )
 
     for data in images_cursor:
         image_id = data.get("image_id")
@@ -266,7 +257,11 @@ async def search(
 
         # Send image data to Predictor service
         if image_binary:
-            message = {"image_data": base64.b64encode(image_binary).decode("utf-8")}
+            message = {
+                "image_data": base64.b64encode(image_binary).decode("utf-8"),
+                "image_path": data.get("filename"),
+                "image_type": data.get("image_type"),
+            }
             channel.basic_publish(
                 exchange="",
                 routing_key=TO_PREDICT_QUEUE,
@@ -278,20 +273,14 @@ async def search(
             "set_type": data.get("set_type"),
             "image_path": data.get("filename"),
             "image_type": data.get("image_type"),
+            "label": data.get("label"),
             "image": image_base64,
+            "prediction": "Processing...",
         }
         images.append(image_data)
 
-    # Start consuming predictions
-    while len(predictions) < len(images):
-        connection.process_data_events()
-
     # Close RabbitMQ connection
     connection.close()
-
-    # Add predictions to images
-    for i, image_data in enumerate(images):
-        image_data["prediction"] = predictions[i] if i < len(predictions) else "N/A"
 
     logger.info(f"Images: {images}")
     return templates.TemplateResponse(

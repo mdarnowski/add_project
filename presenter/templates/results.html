@@ -18,19 +18,36 @@
             background: linear-gradient(to right, #a2d9ff, #2d6dff);
             margin: 20px;
         }
-        .container {
+        .horizontal-scroll-container {
             display: flex;
-            flex-wrap: wrap;
-            justify-content: space-around;
+            overflow-x: auto;
+            padding: 20px;
+            scroll-behavior: smooth;
+        }
+        .horizontal-scroll-container::-webkit-scrollbar {
+            height: 12px;
+        }
+        .horizontal-scroll-container::-webkit-scrollbar-thumb {
+            background: linear-gradient(to right, #ff7e5f, #feb47b);
+            border-radius: 6px;
+        }
+        .horizontal-scroll-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
         }
         .card {
             border: none;
             margin: 10px;
+            flex: 0 0 auto;
             width: 18rem;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
             background-color: #ffffffcc;
             border-radius: 10px;
             overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
         }
         .card img {
             max-width: 100%;
@@ -40,6 +57,7 @@
             font-size: 1.25rem;
             margin: 0.5rem 0;
             padding: 0 1rem;
+            color: #2d6dff;
         }
         .card p {
             margin: 0.5rem 1rem;
@@ -51,18 +69,25 @@
         .text-center {
             text-align: center;
         }
+        .no-results {
+            text-align: center;
+            font-size: 1.5rem;
+            color: #ffffff;
+            margin-top: 50px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="horizontal-scroll-container" id="image-container">
         {% if images %}
             {% for image in images %}
-            <div class="card">
+            <div class="card" id="{{ image.image_path }}">
                 <h2>{{ image.species }}</h2>
                 <p><strong>Set Type:</strong> {{ image.set_type }}</p>
                 <p><strong>Image Path:</strong> {{ image.image_path }}</p>
                 <p><strong>Image Type:</strong> {{ image.image_type }}</p>
-                <p><strong>Prediction:</strong> {{ image.prediction }}</p>
+                <p><strong>Label:</strong> {{ image.label }}</p>
+                <p><strong>Prediction:</strong> <span class="prediction">{{ image.prediction }}</span></p>
                 {% if image.image %}
                 <div class="text-center">
                     <img src="data:image/jpeg;base64,{{ image.image }}" alt="{{ image.image_type }} Image">
@@ -73,8 +98,20 @@
             </div>
             {% endfor %}
         {% else %}
-            <p class="text-center"><em>No results found.</em></p>
+            <p class="no-results"><em>No results found.</em></p>
         {% endif %}
     </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            const card = document.getElementById(data.image_path);
+            if (card) {
+                const predictionElement = card.querySelector('.prediction');
+                predictionElement.textContent = data.predicted_label;
+            }
+        };
+    </script>
 </body>
 </html>
