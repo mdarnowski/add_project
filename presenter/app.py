@@ -12,6 +12,7 @@ from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pika.exceptions import AMQPConnectionError
 from pymongo import MongoClient
 from typing import List
@@ -29,6 +30,7 @@ metrics_collection = db.metrics
 fs = gridfs.GridFS(db)
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # Allow CORS for frontend
