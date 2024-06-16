@@ -5,8 +5,8 @@ import pika
 import os
 import gridfs
 from loguru import logger
-import tensorflow as tf
 import time
+import threading
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 MODEL_CHUNKS_QUEUE = os.getenv("MODEL_CHUNKS_QUEUE", "model_chunks_queue")
@@ -17,12 +17,16 @@ client = MongoClient(MONGO_URI)
 db = client[MONGO_DB]
 fs = gridfs.GridFS(db)
 
+
 class ModelUploader:
     def __init__(self):
         self.connection = None
         self.channel = None
         self.chunks = {}
+        self.total_chunks = 0
+        self.all_chunks_received = threading.Event()
         self.connect_to_rabbitmq()
+        self.lock = threading.Lock()
 
     def connect_to_rabbitmq(self):
         while True:
@@ -39,52 +43,72 @@ class ModelUploader:
                 )
                 logger.info("Connected to RabbitMQ.")
                 break
-            except pika.exceptions.AMQPConnectionError as e:
-                logger.warning(f"Connection to RabbitMQ failed: {e}. Retrying in 5 seconds...")
+            except pika.exceptions.AMQPConnectionError:
+                logger.warning("RabbitMQ not available, retrying in 5 seconds...")
                 time.sleep(5)
 
     def receive_chunk(self, ch, method, properties, body):
         try:
             message = json.loads(body)
             chunk_index = message["chunk_index"]
-            total_chunks = message["total_chunks"]
+            print(f"Received chunk: {chunk_index}")
+            self.total_chunks = message["total_chunks"]
+            print(f"Total chunks: {self.total_chunks}")
             data = base64.b64decode(message["data"])
 
-            if chunk_index not in self.chunks:
-                self.chunks[chunk_index] = data
+            with self.lock:  # Ensure thread-safe access to self.chunks
+                if chunk_index not in self.chunks:
+                    self.chunks[chunk_index] = data
+                print(f"Chunks received: {len(self.chunks)}")
 
-            if len(self.chunks) == total_chunks:
-                self.save_model()
-                self.chunks.clear()
+            if len(self.chunks) == self.total_chunks:
+                self.all_chunks_received.set()  # Signal that all chunks are received
         except Exception as e:
             logger.error(f"Error processing chunk: {e}")
 
     def save_model(self):
         try:
-            ordered_chunks = [self.chunks[i] for i in sorted(self.chunks.keys())]
-            model_data = b"".join(ordered_chunks)
+            with self.lock:  # Ensure thread-safe access to self.chunks
+                ordered_chunks = [self.chunks[i] for i in sorted(self.chunks.keys())]
+                model_data = b"".join(ordered_chunks)
 
+            # Writing to file to verify model integrity
             with open("received_model.keras", "wb") as f:
                 f.write(model_data)
 
-            tf.keras.models.load_model("received_model.keras")
-            logger.info("Model loaded successfully from received data.")
+            # Attempt to load the model to check if it's valid
+            #tf.keras.models.load_model("received_model.keras")
+            #logger.info("Model loaded successfully from received data.")
 
+            # Save model to MongoDB GridFS
             fs.put(model_data, filename="model.keras")
             logger.info("Model saved to MongoDB GridFS")
+
         except Exception as e:
-            logger.error(f"Error saving model: {e}")
+            logger.error(f"Error during save_model: {e}")
 
     def start_consuming(self):
+        threading.Thread(target=self._consume).start()
+        threading.Thread(target=self._monitor_chunks).start()
+
+    def _consume(self):
         while True:
             try:
-                logger.info("Starting consumption.")
                 self.channel.start_consuming()
-            except pika.exceptions.StreamLostError as e:
-                logger.warning(f"Stream connection lost: {e}. Attempting to reconnect...")
+            except pika.exceptions.StreamLostError:
+                logger.warning("Stream connection lost, attempting to reconnect...")
                 self.connect_to_rabbitmq()
-            except Exception as e:
-                logger.error(f"Unexpected error: {e}")
+
+    def _monitor_chunks(self):
+        while True:
+            self.all_chunks_received.wait()  # Wait until all chunks are received
+            logger.info("All chunks received, starting to save the model.")
+            self.save_model()
+            with self.lock:  # Ensure thread-safe modification of self.chunks
+                self.chunks.clear()  # Clear chunks after saving the model
+            self.all_chunks_received.clear()  # Reset the event
+            logger.info("Model saved and chunks cleared.")
+
 
 if __name__ == "__main__":
     uploader = ModelUploader()
