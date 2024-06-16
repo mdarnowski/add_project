@@ -26,30 +26,16 @@ CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks
 
 
 class RabbitMQLoggerCallback(Callback):
-    def __init__(self, total_epochs: int):
+    def __init__(
+        self, total_epochs: int, connection, channel_uploader, channel_presenter
+    ):
         super().__init__()
         self.total_epochs = total_epochs
         self.training_id = str(datetime.now())
         self.phase = None
-        self.connection = None
-        self.channel_uploader = None
-        self.channel_presenter = None
-        self.connect_to_rabbitmq()
-
-    def connect_to_rabbitmq(self):
-        if self.connection and self.connection.is_open:
-            return
-        self.connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=RABBITMQ_HOST)
-        )
-        self.channel_uploader = self.connection.channel()
-        self.channel_uploader.queue_declare(queue=QUEUE_UPLOADER)
-        self.channel_presenter = self.connection.channel()
-        self.channel_presenter.queue_declare(queue=QUEUE_PRESENTER)
-
-    def close_connection(self):
-        if self.connection and self.connection.is_open:
-            self.connection.close()
+        self.connection = connection
+        self.channel_uploader = channel_uploader
+        self.channel_presenter = channel_presenter
 
     def on_epoch_end(self, epoch, logs=None):
         epoch_metrics = {
@@ -64,7 +50,6 @@ class RabbitMQLoggerCallback(Callback):
         }
         print("Epoch metrics: sending", epoch_metrics)
 
-        self.connect_to_rabbitmq()
         self.channel_uploader.basic_publish(
             exchange="",
             routing_key=QUEUE_UPLOADER,
@@ -87,30 +72,28 @@ class Trainer:
         self.rabbitmq_host = RABBITMQ_HOST
         self.connection = None
         self.channel = None
+        self.channel_uploader = None
+        self.channel_presenter = None
+        self.connect_to_rabbitmq()
         self.tfrecord_writers = {}
         self.done_signals = {}
         self.num_classes = None
-        self.connect_to_rabbitmq()
-
-    def initialize_writers(self) -> None:
-        self.tfrecord_writers = {
-            "train": tf.io.TFRecordWriter("train.tfrecord"),
-            "val": tf.io.TFRecordWriter("val.tfrecord"),
-            "test": tf.io.TFRecordWriter("test.tfrecord"),
-        }
-        self.done_signals = {"train": False, "val": False, "test": False}
 
     def connect_to_rabbitmq(self) -> None:
         while True:
             try:
                 self.connection = pika.BlockingConnection(
-                    pika.ConnectionParameters(self.rabbitmq_host)
+                    pika.ConnectionParameters(self.rabbitmq_host, heartbeat=3600)
                 )
                 self.channel = self.connection.channel()
                 self.channel.queue_declare(queue="image_queue_downloader")
                 self.channel.queue_declare(queue="data_request_queue")
                 self.channel.queue_declare(queue="num_classes_queue")
                 self.channel.queue_declare(queue="training_queue")
+                self.channel_uploader = self.connection.channel()
+                self.channel_uploader.queue_declare(queue=QUEUE_UPLOADER)
+                self.channel_presenter = self.connection.channel()
+                self.channel_presenter.queue_declare(queue=QUEUE_PRESENTER)
                 logger.info("Connected to RabbitMQ.")
                 # Start consuming num_classes before requesting data
                 self.channel.basic_consume(
@@ -127,6 +110,14 @@ class Trainer:
             except pika.exceptions.AMQPConnectionError:
                 logger.warning("RabbitMQ not available, retrying in 5 seconds...")
                 time.sleep(5)
+
+    def initialize_writers(self) -> None:
+        self.tfrecord_writers = {
+            "train": tf.io.TFRecordWriter("train.tfrecord"),
+            "val": tf.io.TFRecordWriter("val.tfrecord"),
+            "test": tf.io.TFRecordWriter("test.tfrecord"),
+        }
+        self.done_signals = {"train": False, "val": False, "test": False}
 
     def consume_message(self, ch, method, properties, body) -> None:
         try:
@@ -275,7 +266,12 @@ class Trainer:
             monitor="val_loss", patience=5, restore_best_weights=True
         )
 
-        rabbitmq_logger = RabbitMQLoggerCallback(frozen_epochs+unfrozen_epochs)
+        rabbitmq_logger = RabbitMQLoggerCallback(
+            frozen_epochs + unfrozen_epochs,
+            self.connection,
+            self.channel_uploader,
+            self.channel_presenter,
+        )
 
         print("Training with frozen base model...")
         rabbitmq_logger.phase = "frozen"
@@ -315,8 +311,6 @@ class Trainer:
 
         logger.info("Saving model... splitting into chunks")
         self.save_and_split_model(model)
-
-        rabbitmq_logger.close_connection()
 
         logger.info("Evaluating on test data...")
         test_loss, test_accuracy = model.evaluate(
@@ -369,10 +363,7 @@ def load_tfrecord_dataset(
     dataset = dataset.map(parse_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
     dataset = dataset.map(lambda x, y: (x, tf.one_hot(y, num_classes)))
     dataset = (
-        dataset.shuffle(shuffle_buffer_size)
-        .repeat()
-        .batch(batch_size)
-        .prefetch(tf.data.AUTOTUNE)
+        dataset.shuffle(shuffle_buffer_size).repeat().batch(batch_size).prefetch(10)
     )
     return dataset
 
